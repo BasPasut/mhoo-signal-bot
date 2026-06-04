@@ -14,6 +14,7 @@ interface PerfRow {
   timeframe: string;
   wins: number;
   losses: number;
+  breakevens: number;
   expired: number;
   total: number;
   win_rate: number | null;
@@ -59,8 +60,9 @@ function adjColor(wr: number | null): string {
 // ── Summary cards ─────────────────────────────────────────────────────────────
 
 function Summary({ rows }: { rows: PerfRow[] }) {
-  const decided = rows.reduce((a, r) => a + r.wins + r.losses, 0);
-  const wins = rows.reduce((a, r) => a + r.wins, 0);
+  const decided    = rows.reduce((a, r) => a + r.wins + r.losses, 0);
+  const wins       = rows.reduce((a, r) => a + r.wins, 0);
+  const breakevens = rows.reduce((a, r) => a + (r.breakevens ?? 0), 0);
   const liveWR = decided > 0 ? Math.round((wins / decided) * 100) : null;
   const best = rows
     .filter((r) => r.win_rate != null && r.wins + r.losses >= 5)
@@ -70,7 +72,7 @@ function Summary({ rows }: { rows: PerfRow[] }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
       {[
-        { label: "Total resolved", value: decided, sub: `${wins}W / ${decided - wins}L` },
+        { label: "Total resolved", value: decided + breakevens, sub: `${wins}W · ${decided - wins}L · ${breakevens}BE` },
         {
           label: "Live win rate",
           value: liveWR != null ? `${liveWR}%` : "—",
@@ -239,14 +241,17 @@ function PortfolioPanel() {
         <div>
           <h2 className="font-semibold text-white">Paper Portfolio</h2>
           <p className="text-xs text-gray-500 mt-0.5">
-            $10,000 virtual — every signal auto-tracked from entry price to TP1 / SL
+            $10,000 virtual — WIN exits at actual TP hit (TP1 or TP2), LOSS exits at SL, BREAKEVEN = 0 PnL
           </p>
         </div>
         <div className="text-right">
           <div className={clsx("text-2xl font-bold", isPositive ? "text-emerald-400" : "text-red-400")}>
             {isPositive ? "+" : ""}{summary.total_return_pct.toFixed(1)}%
           </div>
-          <div className="text-xs text-gray-600">{summary.total_trades} trades</div>
+          <div className="text-xs text-gray-600">
+            {summary.total_trades} trades
+            {(summary.breakevens ?? 0) > 0 && <span className="text-yellow-700 ml-1">· {summary.breakevens} BE</span>}
+          </div>
         </div>
       </div>
 
@@ -284,8 +289,9 @@ function PortfolioPanel() {
 
       {/* Disclaimer */}
       <p className="text-[10px] text-gray-600">
-        Simulated paper trade: entry at signal price, WIN exits at TP1, LOSS exits at SL.
-        Real execution may differ due to slippage and missed fills. Not financial advice.
+        Simulated paper trade · entry at signal price · WIN exits at actual hit price (TP1 or TP2, using exact result_price) ·
+        LOSS exits at SL · BREAKEVEN = 0 PnL (SL was moved to entry after TP1 hit) ·
+        PnL uses actual result_price, not estimated R/R. Real fills may differ due to slippage. Not financial advice.
       </p>
     </div>
   );
@@ -582,6 +588,7 @@ export default function PerformancePage() {
                 <tr className="text-gray-500 border-b border-gray-800 text-left">
                   <th className="pb-2 font-medium">Symbol</th>
                   <th className="pb-2 font-medium text-right">W/L</th>
+                  <th className="pb-2 font-medium text-right">BE</th>
                   <th className="pb-2 font-medium text-right">Exp</th>
                   <th className="pb-2 font-medium w-28">Win rate</th>
                   <th className="pb-2 font-medium text-right">Conf adj</th>
@@ -605,6 +612,7 @@ export default function PerformancePage() {
                         <span className="text-gray-600">/</span>
                         <span className="text-red-400">{r.losses}</span>
                       </td>
+                      <td className="py-2 text-right text-yellow-700">{r.breakevens ?? 0}</td>
                       <td className="py-2 text-right text-gray-600">{r.expired}</td>
                       <td className="py-2 w-28">
                         <div className="flex items-center gap-2">

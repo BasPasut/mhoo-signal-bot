@@ -109,13 +109,29 @@ def invalidate(symbol: str, timeframe: str):
     _cache.pop(key, None)
 
 
+def _actual_rr(sig) -> float:
+    """
+    Compute the true R/R from result_price when available — important for TP2 wins
+    where the gain is larger than the stored TP1-based risk_reward.
+    Falls back to sig.risk_reward (TP1) if result_price is missing.
+    """
+    if sig.result_price and sig.entry_price and sig.sl:
+        sl_dist = abs(sig.entry_price - sig.sl)
+        if sl_dist > 0:
+            tp_dist = abs(sig.result_price - sig.entry_price)
+            return tp_dist / sl_dist
+    return sig.risk_reward or 1.5
+
+
 def equity_curve(starting_balance: float = 10_000.0) -> list[dict]:
     """
     Compute a hypothetical paper-trading equity curve from all resolved signals.
 
     Each resolved signal is treated as a paper trade:
-      WIN  → gains  risk_reward × risk_usd
-      LOSS → loses  risk_usd  (1R)
+      WIN        → gains  actual_rr × risk_usd  (uses result_price for TP2 accuracy)
+      LOSS       → loses  risk_usd  (1R)
+      BREAKEVEN  → 0 PnL  (shown as a neutral point on the chart — no money lost)
+      EXPIRED    → excluded (no fill assumed)
 
     Returns list of data points ordered by resolution time — ready to feed a chart.
     """
@@ -126,7 +142,7 @@ def equity_curve(starting_balance: float = 10_000.0) -> list[dict]:
         with Session(engine) as s:
             resolved = s.exec(
                 select(Signal)
-                .where(Signal.result.in_(["win", "loss"]))  # type: ignore
+                .where(Signal.result.in_(["win", "loss", "breakeven"]))  # type: ignore
                 .order_by(asc(Signal.result_at))
             ).all()
     except Exception as e:
@@ -145,9 +161,12 @@ def equity_curve(starting_balance: float = 10_000.0) -> list[dict]:
         risk_usd = balance * (risk_pct / 100)
 
         if sig.result == "win":
-            pnl = risk_usd * (sig.risk_reward or 1.5)
-        else:
+            rr = _actual_rr(sig)
+            pnl = risk_usd * rr
+        elif sig.result == "loss":
             pnl = -risk_usd
+        else:  # breakeven
+            pnl = 0.0
 
         balance = max(0.0, balance + pnl)
         peak = max(peak, balance)
@@ -163,6 +182,9 @@ def equity_curve(starting_balance: float = 10_000.0) -> list[dict]:
             "direction": sig.direction,
             "confidence": round(sig.confidence, 1),
             "drawdown_pct": round(drawdown_pct, 2),
+            # Extra fields useful for analysis
+            "tp1_hit": bool(sig.tp1_hit),
+            "leverage": sig.leverage or 1,
         })
 
     return curve
@@ -193,8 +215,9 @@ def portfolio_summary(starting_balance: float = 10_000.0) -> dict:
     total_return_pct = (final - starting_balance) / starting_balance * 100
     max_dd = max(c["drawdown_pct"] for c in curve)
 
-    wins_list = [c for c in curve if c["result"] == "win"]
-    losses_list = [c for c in curve if c["result"] == "loss"]
+    wins_list      = [c for c in curve if c["result"] == "win"]
+    losses_list    = [c for c in curve if c["result"] == "loss"]
+    breakeven_list = [c for c in curve if c["result"] == "breakeven"]
     gross_profit = sum(c["pnl"] for c in wins_list)
     gross_loss = abs(sum(c["pnl"] for c in losses_list))
     profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else None
@@ -235,6 +258,7 @@ def portfolio_summary(starting_balance: float = 10_000.0) -> dict:
         "total_trades": len(curve),
         "wins": len(wins_list),
         "losses": len(losses_list),
+        "breakevens": len(breakeven_list),
         "current_streak": streak,
         "current_streak_type": streak_type,
     }
@@ -248,14 +272,14 @@ def get_all_stats() -> list[dict]:
         with Session(engine) as s:
             rows = s.exec(
                 select(Signal)
-                .where(Signal.result.in_(["win", "loss", "expired"]))  # type: ignore
+                .where(Signal.result.in_(["win", "loss", "expired", "breakeven"]))  # type: ignore
             ).all()
     except Exception as e:
         logger.error(f"get_all_stats failed: {e}")
         return []
 
     buckets: dict[tuple, dict] = defaultdict(
-        lambda: {"wins": 0, "losses": 0, "expired": 0, "durations": []}
+        lambda: {"wins": 0, "losses": 0, "expired": 0, "breakevens": 0, "durations": []}
     )
     for sig in rows:
         key = (sig.symbol, sig.timeframe)
@@ -263,6 +287,8 @@ def get_all_stats() -> list[dict]:
             buckets[key]["wins"] += 1
         elif sig.result == "loss":
             buckets[key]["losses"] += 1
+        elif sig.result == "breakeven":
+            buckets[key]["breakevens"] += 1
         else:
             buckets[key]["expired"] += 1
         # Track resolution duration
@@ -280,8 +306,10 @@ def get_all_stats() -> list[dict]:
             "timeframe": tf,
             "wins": data["wins"],
             "losses": data["losses"],
+            "breakevens": data["breakevens"],
             "expired": data["expired"],
-            "total": decided + data["expired"],
+            "total": decided + data["expired"] + data["breakevens"],
+            # Win rate: breakevens excluded from denominator (neutral — not a loss, not a win)
             "win_rate": round(data["wins"] / decided * 100, 1) if decided else None,
             "avg_duration_hours": round(avg_dur, 1) if avg_dur is not None else None,
         })
