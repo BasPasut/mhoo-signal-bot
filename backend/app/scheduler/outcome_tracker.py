@@ -203,6 +203,13 @@ async def _mark_tp1_hit(sig: Signal, tp1_candle_time: pd.Timestamp):
         f"tp1={sig.tp1:.4f} breakeven_sl={be_sl:.4f} — riding to TP2={sig.tp2:.4f}"
     )
 
+    # Push real-time update to all connected dashboard clients
+    from app.core.ws import manager
+    asyncio.create_task(manager.broadcast_tp1_update(
+        signal_id=sig.id,
+        breakeven_sl=be_sl,
+        tp1_hit_at=now.isoformat() + "Z",
+    ))
     asyncio.create_task(_notify_discord_tp1(sig, be_sl))
 
 

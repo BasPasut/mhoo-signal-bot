@@ -184,6 +184,10 @@ async def update_signal(signal_id: int, body: dict, session: Session = Depends(g
         tp1 = float(body["tp1"])
         if tp1 <= 0:
             raise HTTPException(400, "TP1 must be positive")
+        if s.direction == "LONG" and tp1 <= s.entry_price:
+            raise HTTPException(400, "LONG TP1 must be above entry price")
+        if s.direction == "SHORT" and tp1 >= s.entry_price:
+            raise HTTPException(400, "SHORT TP1 must be below entry price")
         s.tp1 = tp1
         sl_dist = abs(s.entry_price - s.sl)
         tp_dist = abs(tp1 - s.entry_price)
@@ -192,6 +196,10 @@ async def update_signal(signal_id: int, body: dict, session: Session = Depends(g
         tp2 = float(body["tp2"])
         if tp2 <= 0:
             raise HTTPException(400, "TP2 must be positive")
+        if s.direction == "LONG" and tp2 <= s.entry_price:
+            raise HTTPException(400, "LONG TP2 must be above entry price")
+        if s.direction == "SHORT" and tp2 >= s.entry_price:
+            raise HTTPException(400, "SHORT TP2 must be below entry price")
         s.tp2 = tp2
     session.add(s)
     session.commit()
@@ -206,7 +214,9 @@ async def signal_stats(session: Session = Depends(get_session)):
     wins = sum(1 for s in signals if s.result == "win")
     losses = sum(1 for s in signals if s.result == "loss")
     expired = sum(1 for s in signals if s.result == "expired")
-    open_count = sum(1 for s in signals if s.result is None)
+    breakevens = sum(1 for s in signals if s.result == "breakeven")
+    riding_count = sum(1 for s in signals if s.result is None and s.tp1_hit)
+    open_count = sum(1 for s in signals if s.result is None and not s.tp1_hit)
     longs = sum(1 for s in signals if s.direction == "LONG")
     shorts = sum(1 for s in signals if s.direction == "SHORT")
     avg_confidence = sum(s.confidence for s in signals) / total if total else 0
@@ -216,7 +226,9 @@ async def signal_stats(session: Session = Depends(get_session)):
         "wins": wins,
         "losses": losses,
         "expired": expired,
+        "breakevens": breakevens,
         "open": open_count,
+        "riding": riding_count,
         "win_rate": round(wins / decided * 100, 1) if decided else 0,
         "longs": longs,
         "shorts": shorts,

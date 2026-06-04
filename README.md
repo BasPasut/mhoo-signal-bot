@@ -111,24 +111,48 @@ Cross-symbol cooldown: same symbol cannot fire again within 2 hours regardless o
 
 ## Outcome Tracking & ML Feedback Loop
 
-The outcome tracker runs every 2 minutes and resolves open signals against kline OHLC data:
+The outcome tracker runs every 2 minutes and resolves open signals against kline OHLC data using a **2-phase approach**:
 
-- **SL-first check** within each candle (conservative / realistic)
-- On resolution: stores `result_at`, `result_price`, MFE, MAE
-- Updates the ML feature store so XGBoost retrains on real outcomes
-- Clears the dedup slot so the next valid setup fires immediately
-- Sends a Discord outcome notification (WIN / LOSS / EXPIRED)
+### Phase 1 — Watching for SL or TP1
+Walk candles from signal creation. SL-first within each candle (conservative / realistic).
+- **SL touched** → `result = loss`
+- **TP1 touched** → enter Phase 2. If TP2 is also hit in the same kline pass → `result = win` immediately.
+
+### Phase 2 — Riding to TP2 (risk-free)
+Walk candles from `tp1_hit_at`. Breakeven SL-first.
+- **Breakeven SL touched** → `result = breakeven` (no loss, SL was at entry + fees)
+- **TP2 touched** → `result = win`
+- **24h timeout** → `result = expired`
+
+On any resolution:
+- Stores `result_at`, `result_price`, MFE, MAE
+- Updates ML feature store so XGBoost retrains on real outcomes
+- Clears dedup slot so the next valid setup fires immediately
+- Sends Discord notification (WIN / BREAKEVEN / LOSS / EXPIRED)
+
+### Position Limit Exemption
+Once a signal hits TP1, it is marked `tp1_hit=True` and **no longer counted** against the max open positions limit. A new signal can enter immediately. Signals in Phase 2 are shown in a separate "🔒 Riding to TP2" section on the dashboard.
+
+---
+
+## Manual Overrides
+
+Each open signal card has an override panel (expand ▾):
+- **Leverage** — preset buttons capped by liquidity tier + custom input
+- **TP1 / TP2** — number inputs with live R/R and % gain preview; validated for correct direction
+- Changes persist to DB immediately
 
 ---
 
 ## Dashboard Features
 
-- **Live signals** — real-time via WebSocket, shows entry zone, TP1, TP2, SL, leverage, tier
-- **Live PnL** — per open position, price fetched from Binance on load + every 60s
-- **Stats bar** — win rate, avg R/R, total signals, open positions
+- **Live signals** — real-time via WebSocket; moves to "Riding" section instantly when TP1 hits
+- **Riding to TP2 section** — separate yellow-bordered section; shows breakeven SL, TP2 as active target, riding duration
+- **Live PnL** — per open position, fetched from Binance on load + every 60s
+- **Stats bar** — win rate, W/L/BE counts, open + riding positions, total signals
 - **Analytics panel** — confidence distribution, win rate by direction, tier breakdown
 - **Performance page** — equity curve, MFE/MAE distribution, per-symbol stats
-- **History page** — full signal log with filters
+- **History page** — full signal log with filters; WIN / BREAKEVEN / STOPPED OUT / EXPIRED banners
 - **Settings page** — live config: watchlist, risk profile, timeframes, scan interval, max positions
 
 ---

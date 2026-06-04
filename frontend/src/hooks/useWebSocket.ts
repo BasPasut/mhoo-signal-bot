@@ -5,6 +5,7 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
 
 type WsMessage =
   | { type: "signal"; data: Signal }
+  | { type: "tp1_update"; data: { id: number; tp1_hit: boolean; tp1_hit_at: string; breakeven_sl: number } }
   | { type: "status"; data: { message: string } };
 
 export interface Signal {
@@ -66,11 +67,13 @@ function notifyStatus(c: boolean) {
   _listeners.forEach((fn) => fn(c));
 }
 
-export function useWebSocket(onSignal: (s: Signal) => void) {
+export function useWebSocket(onSignal: (s: Signal) => void, onTp1Update?: (update: { id: number; tp1_hit: boolean; tp1_hit_at: string; breakeven_sl: number }) => void) {
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
   const onSignalRef = useRef(onSignal);
   onSignalRef.current = onSignal;
+  const onTp1UpdateRef = useRef(onTp1Update);
+  onTp1UpdateRef.current = onTp1Update;
 
   const connect = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) return;
@@ -87,6 +90,7 @@ export function useWebSocket(onSignal: (s: Signal) => void) {
       try {
         const msg: WsMessage = JSON.parse(e.data);
         if (msg.type === "signal") onSignalRef.current(msg.data);
+        if (msg.type === "tp1_update") onTp1UpdateRef.current?.(msg.data);
       } catch {}
     };
   }, []);

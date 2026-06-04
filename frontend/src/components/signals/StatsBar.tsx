@@ -6,7 +6,9 @@ interface StatsBarProps {
     total: number;
     wins: number;
     losses: number;
+    breakevens?: number;
     open: number;
+    riding?: number;
     win_rate: number;
     avg_confidence: number;
   } | null;
@@ -31,7 +33,10 @@ export function StatsBar({ stats, loading }: StatsBarProps) {
       {decided > 0 ? (
         <span>
           <span className={clsx("font-semibold", wrColor)}>{stats.win_rate}%</span>
-          <span className="ml-1 text-gray-700">{stats.wins}W · {stats.losses}L</span>
+          <span className="ml-1 text-gray-700">
+            {stats.wins}W · {stats.losses}L
+            {(stats.breakevens ?? 0) > 0 && ` · ${stats.breakevens}BE`}
+          </span>
         </span>
       ) : (
         <span className="text-gray-700">no results yet</span>
@@ -43,6 +48,15 @@ export function StatsBar({ stats, loading }: StatsBarProps) {
         </span>
         <span className="ml-1">open</span>
       </span>
+      {(stats.riding ?? 0) > 0 && (
+        <>
+          <span className="text-gray-800">·</span>
+          <span>
+            <span className="font-semibold text-yellow-500">{stats.riding}</span>
+            <span className="ml-1 text-yellow-700">riding</span>
+          </span>
+        </>
+      )}
       <span className="text-gray-800">·</span>
       <span>{stats.total} total</span>
     </div>

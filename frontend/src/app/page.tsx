@@ -109,7 +109,12 @@ export default function DashboardPage() {
     fetchPrices();
   }, [fetchPrices]);
 
-  useWebSocket(onSignal);
+  const onTp1Update = useCallback((update: { id: number; tp1_hit: boolean; tp1_hit_at: string; breakeven_sl: number }) => {
+    setSignals(prev => prev.map(s => s.id === update.id ? { ...s, ...update } : s));
+    signalsRef.current = signalsRef.current.map(s => s.id === update.id ? { ...s, ...update } : s);
+  }, []);
+
+  useWebSocket(onSignal, onTp1Update);
 
   const handleScanNow = async () => {
     setScanning(true);

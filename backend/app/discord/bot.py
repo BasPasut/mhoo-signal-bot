@@ -337,10 +337,19 @@ async def send_outcome_notification(sig, result: str, price: float | None):
         if channel is None:
             channel = await _client.fetch_channel(int(settings.discord_channel_id))
 
-        is_win = result == "win"
-        color = 0x1D9E75 if is_win else 0xD85A30
-        icon = "✅" if is_win else "❌"
-        label = "WIN — TP1 Hit" if is_win else "LOSS — Stop Hit"
+        tp1_was_hit = getattr(sig, "tp1_hit", False)
+        if result == "win":
+            icon, color = "✅", 0x1D9E75
+            label = "WIN — TP2 Hit" if tp1_was_hit else "WIN — TP1 Hit"
+        elif result == "breakeven":
+            icon, color = "🟡", 0xF5A623
+            label = "BREAKEVEN — SL at Entry"
+        elif result == "expired":
+            icon, color = "⏳", 0x6B7280
+            label = "EXPIRED — No target hit"
+        else:
+            icon, color = "❌", 0xD85A30
+            label = "LOSS — Stop Hit"
 
         duration_str = ""
         if sig.result_at and sig.created_at:
@@ -351,6 +360,8 @@ async def send_outcome_notification(sig, result: str, price: float | None):
         pct_move = ""
         if price is not None and sig.entry_price:
             pct = (price - sig.entry_price) / sig.entry_price * 100
+            if sig.direction == "SHORT":
+                pct = -pct
             pct_move = f" ({pct:+.2f}%)"
 
         embed = discord.Embed(
@@ -367,6 +378,18 @@ async def send_outcome_notification(sig, result: str, price: float | None):
         embed.add_field(name="Duration", value=duration_str or "—", inline=True)
         embed.add_field(name="Confidence at entry", value=f"`{sig.confidence:.0f}%`", inline=True)
         embed.add_field(name="Timeframe", value=f"`{sig.timeframe}`", inline=True)
+        if tp1_was_hit and result == "win":
+            tp1_gain = abs(sig.tp1 - sig.entry_price) / sig.entry_price * 100
+            tp2_gain = abs(sig.tp2 - sig.entry_price) / sig.entry_price * 100 if sig.tp2 else None
+            embed.add_field(name="TP1 (locked)", value=f"`+{tp1_gain:.2f}%`", inline=True)
+            if tp2_gain:
+                embed.add_field(name="TP2 gain", value=f"`+{tp2_gain:.2f}%`", inline=True)
+        elif result == "loss":
+            sl_pct = abs(sig.sl - sig.entry_price) / sig.entry_price * 100
+            lev = sig.leverage or 1
+            embed.add_field(name="SL distance", value=f"`-{sl_pct:.2f}%`", inline=True)
+            if lev > 1:
+                embed.add_field(name="Leveraged loss", value=f"`-{sl_pct * lev:.1f}%`", inline=True)
         embed.set_footer(text=f"Mhoo Signal Bot · outcome · signal #{sig.id}")
 
         await channel.send(embed=embed)

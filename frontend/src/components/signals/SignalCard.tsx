@@ -314,9 +314,11 @@ export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice, o
   livePrice?: number | null;
   onUpdate?: (updates: Partial<Signal>) => void;
 }) {
-  const isLong     = signal.direction === "LONG";
-  const isOpen     = !signal.result;
-  const isWin      = signal.result === "win";
+  const isLong       = signal.direction === "LONG";
+  const isOpen       = !signal.result;
+  const isWin        = signal.result === "win";
+  const isBreakeven  = signal.result === "breakeven";
+  const isExpired    = signal.result === "expired";
   const isRiding   = isOpen && !!signal.tp1_hit;
   const age        = fmtAge(signal.created_at);
   const leverage   = signal.leverage ?? 1;
@@ -385,9 +387,14 @@ export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice, o
       {!isOpen && (
         <div className={clsx(
           "px-4 py-1 text-[11px] font-bold tracking-wide flex items-center justify-between",
-          isWin ? "bg-emerald-950/50 text-emerald-600" : "bg-red-950/50 text-red-700"
+          isWin        ? "bg-emerald-950/50 text-emerald-600"  :
+          isBreakeven  ? "bg-yellow-950/50 text-yellow-600"    :
+          isExpired    ? "bg-gray-800/50 text-gray-600"        :
+                         "bg-red-950/50 text-red-700"
         )}>
-          <span>{isWin ? "WIN" : "STOPPED OUT"}</span>
+          <span>
+            {isWin ? "WIN" : isBreakeven ? "BREAKEVEN" : isExpired ? "EXPIRED" : "STOPPED OUT"}
+          </span>
           {signal.result_at && (
             <span className="font-normal text-gray-700">{fmtDuration(signal.created_at, signal.result_at)}</span>
           )}
@@ -544,13 +551,33 @@ export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice, o
       {/* ── Footer ── */}
       <div className="border-t border-gray-800/50 px-4 py-2 flex items-center justify-between">
         <div className="flex items-center gap-3 text-xs text-gray-600">
-          <span>
-            R/R <span className="text-gray-400 font-medium">{signal.risk_reward}</span>
-          </span>
-          {leverage > 1 && (
+          {isRiding ? (
             <>
-              <span className="text-gray-800">·</span>
-              <span>{leverage}× isolated</span>
+              <span className="text-yellow-700">riding</span>
+              {signal.tp1_hit_at && (
+                <>
+                  <span className="text-gray-800">·</span>
+                  <span className="text-gray-700">{fmtAge(signal.tp1_hit_at)}</span>
+                </>
+              )}
+              {tp2Gain !== null && (
+                <>
+                  <span className="text-gray-800">·</span>
+                  <span>TP2 <span className="text-emerald-600 font-medium">+{tp2Gain.toFixed(2)}%</span></span>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <span>
+                R/R <span className="text-gray-400 font-medium">{signal.risk_reward}</span>
+              </span>
+              {leverage > 1 && (
+                <>
+                  <span className="text-gray-800">·</span>
+                  <span>{leverage}× isolated</span>
+                </>
+              )}
             </>
           )}
         </div>
