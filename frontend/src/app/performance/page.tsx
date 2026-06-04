@@ -157,7 +157,7 @@ function EquityCurveChart({ curve, startingBalance }: { curve: any[]; startingBa
           tick={{ fill: "#6b7280", fontSize: 10 }}
           tickLine={false}
           axisLine={false}
-          tickFormatter={(v) => `$${(v / 1000).toFixed(1)}k`}
+          tickFormatter={(v) => v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(0)}`}
           width={46}
         />
         <Tooltip content={<CustomTooltip />} />
@@ -196,7 +196,7 @@ function PortfolioPanel() {
       <div className="card space-y-3">
         <div>
           <h2 className="font-semibold text-white">Paper Portfolio</h2>
-          <p className="text-xs text-gray-500 mt-0.5">$10,000 virtual — every fired signal is auto-tracked as a paper trade</p>
+          <p className="text-xs text-gray-500 mt-0.5">${(data?.summary?.starting_balance ?? 10000).toLocaleString()} virtual — every fired signal is auto-tracked as a paper trade</p>
         </div>
         <div className="py-8 text-center text-gray-600 text-sm">
           Portfolio will appear once the first signals resolve (win or loss).
@@ -241,7 +241,7 @@ function PortfolioPanel() {
         <div>
           <h2 className="font-semibold text-white">Paper Portfolio</h2>
           <p className="text-xs text-gray-500 mt-0.5">
-            $10,000 virtual — WIN exits at actual TP hit (TP1 or TP2), LOSS exits at SL, BREAKEVEN = 0 PnL
+            ${summary.starting_balance.toLocaleString()} virtual — WIN exits at actual TP hit (TP1 or TP2), LOSS exits at SL, BREAKEVEN = 0 PnL
           </p>
         </div>
         <div className="text-right">
@@ -285,13 +285,13 @@ function PortfolioPanel() {
       )}
 
       {/* Equity curve chart */}
-      <EquityCurveChart curve={curve} startingBalance={10000} />
+      <EquityCurveChart curve={curve} startingBalance={summary.starting_balance} />
 
       {/* Disclaimer */}
       <p className="text-[10px] text-gray-600">
-        Simulated paper trade · entry at signal price · WIN exits at actual hit price (TP1 or TP2, using exact result_price) ·
+        Simulated paper trade starting at ${summary.starting_balance.toLocaleString()} · entry at signal price · WIN exits at actual hit price (TP1 or TP2, using exact result_price) ·
         LOSS exits at SL · BREAKEVEN = 0 PnL (SL was moved to entry after TP1 hit) ·
-        PnL uses actual result_price, not estimated R/R. Real fills may differ due to slippage. Not financial advice.
+        PnL uses actual result_price, not estimated R/R. Change starting balance in Settings. Real fills may differ due to slippage. Not financial advice.
       </p>
     </div>
   );
