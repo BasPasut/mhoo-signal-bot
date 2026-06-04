@@ -129,8 +129,7 @@ def _surgical_swing_sl(df: pd.DataFrame, direction: str, lookback: int = 20) -> 
 
 # ── Position sizing ───────────────────────────────────────────────────────────
 
-def _position_risk_pct(confidence: float, rr: float, risk_profile: str,
-                       equity_risk_cap: float = 0.02) -> float:
+def _position_risk_pct(confidence: float, rr: float, risk_profile: str) -> float:
     """
     Fixed risk % per signal tier (ALPHA/PRIME/SETUP), scaled by risk profile.
 
@@ -476,7 +475,7 @@ async def score_symbol(symbol: str, timeframe: str, risk_profile: str = "balance
             entry_low    = live_price * 0.999
             entry_high   = live_price * 1.003
 
-        position_risk_pct = _position_risk_pct(confidence, rr, risk_profile, equity_risk)
+        position_risk_pct = _position_risk_pct(confidence, rr, risk_profile)
 
         all_signals = ta_res["signals"] + pat_res["signals"]
         regime      = ta_res["meta"].get("htf_dir", 0)

@@ -161,7 +161,13 @@ def equity_curve(starting_balance: float | None = None) -> list[dict]:
     curve = []
 
     for sig in resolved:
-        risk_pct = sig.position_risk_pct or 1.25
+        # Fallback: derive from confidence tier if position_risk_pct not recorded
+        if sig.position_risk_pct:
+            risk_pct = sig.position_risk_pct
+        else:
+            grade = "ALPHA" if sig.confidence >= 80 else "PRIME" if sig.confidence >= 60 else "SETUP"
+            defaults = {"ALPHA": 1.5, "PRIME": 1.0, "SETUP": 0.5}
+            risk_pct = defaults[grade]
         risk_usd = balance * (risk_pct / 100)
 
         if sig.result == "win":

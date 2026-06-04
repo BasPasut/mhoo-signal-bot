@@ -178,6 +178,7 @@ def analyze_smc(df: pd.DataFrame, direction: int, atr: float) -> dict:
     smc_score = 0.0
     smc_signals = []
     tol = atr * 0.6
+    obs: dict = {"bull": [], "bear": []}   # initialised so meta block is safe if try fails
 
     try:
         obs = find_order_blocks(df)
@@ -238,7 +239,7 @@ def analyze_smc(df: pd.DataFrame, direction: int, atr: float) -> dict:
         "score": smc_score,
         "signals": smc_signals,
         "meta": {
-            "smc_bull_obs": len(obs.get("bull", [])) if "obs" in dir() else 0,
-            "smc_bear_obs": len(obs.get("bear", [])) if "obs" in dir() else 0,
+            "smc_bull_obs": len(obs.get("bull", [])),
+            "smc_bear_obs": len(obs.get("bear", [])),
         },
     }

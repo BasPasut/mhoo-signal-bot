@@ -1,7 +1,9 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
+// Auto-upgrade http/https → ws/wss so misconfigured env vars still work
+const _rawWsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
+const WS_URL = _rawWsUrl.replace(/^http:\/\//, "ws://").replace(/^https:\/\//, "wss://");
 
 type WsMessage =
   | { type: "signal"; data: Signal }

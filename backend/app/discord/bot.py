@@ -231,21 +231,22 @@ async def send_server_info():
         embed.add_field(name="🖥️  Server IP", value=f"`{ip}`", inline=True)
         embed.add_field(name="🕐  Restarted (UTC)", value=f"`{now.strftime('%Y-%m-%d %H:%M:%S')}`", inline=True)
         embed.add_field(
-            name="⚙️  Algorithm  v9  (data-driven filter tuning)",
+            name="⚙️  Algorithm  v10  (fixed risk sizing + bug fixes)",
             value=(
                 "**Layer 0** Daily macro gate — EMA20/50 + slope + HH/HL structure\n"
                 "**Layer 1** 4H HTF — EMA200 + ADX ≥ 12 + ATR-RSI guard\n"
                 "**Layer 2** 1H CTF — MACD histogram direction | RSI guard 35/65\n"
                 "**Layer 3** 15m/1h entry — BB Squeeze | entry-TF RSI guard 35/65\n"
+                "**SMC** Order Blocks + FVGs + Liquidity Sweeps (+0–0.30 boost)\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "**v9 changes over v8 (from live data analysis):**\n"
-                "• Dual TF scanning — each symbol scanned on 15m AND 1h per cycle\n"
-                "• Min confidence raised 65% → 68% — 60–67% band had 37% WR in live data\n"
-                "• RSI guard on 1H CTF layer: SHORT blocked if RSI < 35, LONG if RSI > 65\n"
-                "• RSI guard on entry TF (15m/1h): same 35/65 thresholds — catches oversold entries the 1H guard misses\n"
-                "• ADX floor lowered 27 → 12, volume floor 0.7× → 0.05× — data collection phase\n"
-                "• R/R minimum lowered 1.5 → 1.3 — more signals for data gathering\n"
-                "• Signal tier filter — user selects ALPHA/PRIME/SETUP grades to receive"
+                "**v10 changes over v9:**\n"
+                "• Fixed risk sizing — ALPHA 1.5% / PRIME 1.0% / SETUP 0.5% of portfolio\n"
+                "  (replaces Fractional Kelly which was producing 5–8% risk per trade)\n"
+                "• Risk % configurable per tier in Settings page\n"
+                "• Configurable starting balance for real portfolio simulation\n"
+                "• SMC: fixed `obs` scope bug — no longer silently returns 0 on error\n"
+                "• Equity curve fallback risk uses actual confidence tier, not 1.25%\n"
+                "• WebSocket URL auto-upgrades http→ws to prevent connection failures"
             ),
             inline=False,
         )
