@@ -119,8 +119,12 @@ export default function DashboardPage() {
     setTimeout(() => { setScanning(false); setScanMsg(""); }, 3000);
   };
 
-  const filtered = filter === "ALL" ? signals : signals.filter(s => s.direction === filter);
-  const openCount  = stats?.open ?? 0;
+  // Split: riding-to-TP2 signals are free-risk and excluded from the position limit
+  const ridingSignals = signals.filter(s => !s.result && s.tp1_hit);
+  const activeSignals = signals.filter(s => !s.result && !s.tp1_hit);
+  const filteredActive = filter === "ALL" ? activeSignals : activeSignals.filter(s => s.direction === filter);
+  const filteredRiding = filter === "ALL" ? ridingSignals : ridingSignals.filter(s => s.direction === filter);
+  const openCount  = activeSignals.length;
   const atPositionLimit = openCount >= maxOpenPositions;
 
   return (
@@ -183,11 +187,51 @@ export default function DashboardPage() {
             {f}
           </button>
         ))}
-        <span className="text-xs text-gray-700 ml-1">{filtered.length}</span>
+        <span className="text-xs text-gray-700 ml-1">{filteredActive.length + filteredRiding.length}</span>
       </div>
 
-      {/* ── Signal grid ── */}
-      {filtered.length === 0 ? (
+      {/* ── Riding to TP2 section ── */}
+      {filteredRiding.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold text-yellow-500 tracking-wider uppercase">
+              🔒 Riding to TP2
+            </span>
+            <span className="text-[10px] text-gray-700">
+              · SL at breakeven · not counted in position limit
+            </span>
+            <span className="ml-auto text-[10px] text-yellow-700 font-medium">
+              {filteredRiding.length} position{filteredRiding.length > 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-1 lg:grid-cols-2">
+            {filteredRiding.map(s => (
+              <SignalCard
+                key={s.id}
+                signal={s}
+                isNew={newIds.has(s.id)}
+                livePrice={prices[s.symbol] ?? null}
+                onUpdate={(updates) => {
+                  setSignals(prev => prev.map(x => x.id === s.id ? { ...x, ...updates } : x));
+                  signalsRef.current = signalsRef.current.map(x => x.id === s.id ? { ...x, ...updates } : x);
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Active positions section ── */}
+      {filteredRiding.length > 0 && filteredActive.length > 0 && (
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-bold text-gray-500 tracking-wider uppercase">
+            Open Positions
+          </span>
+          <span className="text-[10px] text-gray-700">· {openCount}/{maxOpenPositions} slots used</span>
+        </div>
+      )}
+
+      {filteredActive.length === 0 && filteredRiding.length === 0 ? (
         <div className="border border-gray-800 rounded-lg text-center py-16">
           <p className="text-sm text-gray-600">No open positions</p>
           <p className="text-xs text-gray-700 mt-1">
@@ -196,9 +240,9 @@ export default function DashboardPage() {
               : `All ${filter} signals filtered — switch to ALL`}
           </p>
         </div>
-      ) : (
+      ) : filteredActive.length > 0 ? (
         <div className="grid gap-3 sm:grid-cols-1 lg:grid-cols-2">
-          {filtered.map(s => (
+          {filteredActive.map(s => (
             <SignalCard
               key={s.id}
               signal={s}
@@ -211,7 +255,7 @@ export default function DashboardPage() {
             />
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* ── Glossary ── */}
       <Glossary />

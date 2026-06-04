@@ -38,11 +38,15 @@ _SCAN_LOCK = asyncio.Lock()
 
 
 def _open_signal_count() -> int:
+    """Count open positions that still carry full risk.
+    Signals that have hit TP1 (tp1_hit=True) have SL at breakeven — they cannot
+    lose money and therefore do NOT count against the position limit."""
     cutoff = datetime.utcnow() - timedelta(hours=24)
     with Session(engine) as s:
         rows = s.exec(
             select(Signal)
             .where(Signal.result == None)  # noqa: E711
+            .where(Signal.tp1_hit == False)  # noqa: E712
             .where(Signal.created_at >= cutoff)
         ).all()
         return len(rows)

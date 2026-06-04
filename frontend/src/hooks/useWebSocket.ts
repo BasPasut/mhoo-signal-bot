@@ -43,6 +43,10 @@ export interface Signal {
   trailing_stop_atr?: number;
   // Multi-TF: present when 2+ entry timeframes confirmed the same direction
   confirmed_timeframes?: string[];
+  // TP1-hit / riding-to-TP2 state
+  tp1_hit?: boolean;
+  tp1_hit_at?: string;
+  breakeven_sl?: number;
 }
 
 let _connected = false;

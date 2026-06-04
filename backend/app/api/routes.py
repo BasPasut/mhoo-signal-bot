@@ -581,4 +581,8 @@ def _signal_to_dict(s: Signal) -> dict:
         "result": s.result,
         "result_at": s.result_at.isoformat() + "Z" if s.result_at else None,
         "result_price": s.result_price,
+        "tier": s.tier,
+        "tp1_hit": s.tp1_hit,
+        "tp1_hit_at": s.tp1_hit_at.isoformat() + "Z" if s.tp1_hit_at else None,
+        "breakeven_sl": s.breakeven_sl,
     }

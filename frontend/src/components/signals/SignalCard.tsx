@@ -317,6 +317,7 @@ export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice, o
   const isLong     = signal.direction === "LONG";
   const isOpen     = !signal.result;
   const isWin      = signal.result === "win";
+  const isRiding   = isOpen && !!signal.tp1_hit;
   const age        = fmtAge(signal.created_at);
   const leverage   = signal.leverage ?? 1;
   const [expanded, setExpanded] = useState(false);
@@ -333,7 +334,15 @@ export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice, o
         : (signal.entry_price - signal.tp2) / signal.entry_price * 100)
     : null;
 
-  const slLoss = Math.abs(signal.sl - signal.entry_price) / signal.entry_price * 100;
+  // When riding to TP2, SL is at breakeven — use that for the loss reference
+  const activeSl   = isRiding && signal.breakeven_sl ? signal.breakeven_sl : signal.sl;
+  const slLoss     = Math.abs(activeSl - signal.entry_price) / signal.entry_price * 100;
+
+  // For the PnL bar: when riding, target is TP2; otherwise TP1
+  const pnlTarget  = isRiding && signal.tp2 > 0 ? signal.tp2 : signal.tp1;
+  const pnlTargetGain = isLong
+    ? (pnlTarget - signal.entry_price) / signal.entry_price * 100
+    : (signal.entry_price - pnlTarget) / signal.entry_price * 100;
 
   const resolvedPrice = livePrice ?? null;
   const livePnl = isOpen && resolvedPrice !== null
@@ -343,12 +352,13 @@ export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice, o
     : null;
 
   // ── Accent border ──────────────────────────────────────────────────────────
-  // Open: switch from direction color to P&L color once price is loaded
   const borderColor = !isOpen
     ? "border-l-gray-700"
-    : livePnl === null
-      ? (isLong ? "border-l-emerald-700" : "border-l-red-700")
-      : livePnl >= 0 ? "border-l-emerald-500" : "border-l-red-600";
+    : isRiding
+      ? "border-l-yellow-500"           // golden — locked-in profit ride
+      : livePnl === null
+        ? (isLong ? "border-l-emerald-700" : "border-l-red-700")
+        : livePnl >= 0 ? "border-l-emerald-500" : "border-l-red-600";
 
   const reasons = (signal.triggers ?? [])
     .map(tr => plainReason(tr.label))
@@ -362,6 +372,14 @@ export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice, o
       !isOpen && "opacity-65",
       isNew && "ring-1 ring-emerald-800/40 shadow-[0_0_12px_rgba(52,211,153,0.06)]",
     )}>
+
+      {/* ── TP1 hit banner ── */}
+      {isRiding && (
+        <div className="px-4 py-1 text-[11px] font-bold tracking-wide flex items-center justify-between bg-yellow-950/40 text-yellow-500 border-b border-yellow-900/30">
+          <span>🎯 TP1 Hit — Riding to TP2</span>
+          <span className="font-normal text-yellow-700 text-[10px]">SL → breakeven · risk-free</span>
+        </div>
+      )}
 
       {/* ── Resolved banner (History page only) ── */}
       {!isOpen && (
@@ -455,7 +473,7 @@ export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice, o
 
               {/* Progress bar */}
               {livePnl !== null && (
-                <PnlBar pnl={livePnl} tp1Gain={tp1Gain} slLoss={slLoss} />
+                <PnlBar pnl={livePnl} tp1Gain={pnlTargetGain} slLoss={slLoss} />
               )}
             </div>
           )}
@@ -471,36 +489,54 @@ export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice, o
             {fmt(signal.entry_low)} – {fmt(signal.entry_high)}
           </span>
         </div>
-        {/* TP1 */}
+        {/* TP1 — show as struck-through / done when riding */}
         <div className="flex items-center gap-2">
-          <span className="text-gray-600 w-10 shrink-0">TP1</span>
-          <span className="font-mono text-gray-200 tabular-nums font-medium">{fmt(signal.tp1)}</span>
-          <div className="ml-auto flex items-center gap-2.5">
-            <span className="text-emerald-500 tabular-nums">+{tp1Gain.toFixed(2)}%</span>
-            {leverage > 1 && (
-              <span className="text-emerald-800 tabular-nums">+{(tp1Gain * leverage).toFixed(1)}% lev</span>
-            )}
-          </div>
+          <span className={clsx("w-10 shrink-0", isRiding ? "text-yellow-700" : "text-gray-600")}>TP1</span>
+          <span className={clsx("font-mono tabular-nums font-medium", isRiding ? "text-yellow-600 line-through" : "text-gray-200")}>
+            {fmt(signal.tp1)}
+          </span>
+          {isRiding ? (
+            <span className="ml-auto text-yellow-700 text-[10px]">✓ hit</span>
+          ) : (
+            <div className="ml-auto flex items-center gap-2.5">
+              <span className="text-emerald-500 tabular-nums">+{tp1Gain.toFixed(2)}%</span>
+              {leverage > 1 && (
+                <span className="text-emerald-800 tabular-nums">+{(tp1Gain * leverage).toFixed(1)}% lev</span>
+              )}
+            </div>
+          )}
         </div>
-        {/* TP2 */}
+        {/* TP2 — highlight as active target when riding */}
         {tp2Gain !== null && (
           <div className="flex items-center gap-2">
-            <span className="text-gray-600 w-10 shrink-0">TP2</span>
-            <span className="font-mono text-gray-500 tabular-nums">{fmt(signal.tp2)}</span>
+            <span className={clsx("w-10 shrink-0", isRiding ? "text-emerald-500 font-bold" : "text-gray-600")}>TP2</span>
+            <span className={clsx("font-mono tabular-nums", isRiding ? "text-emerald-300 font-bold" : "text-gray-500")}>
+              {fmt(signal.tp2)}
+            </span>
             <div className="ml-auto flex items-center gap-2.5">
-              <span className="text-emerald-600/70 tabular-nums">+{tp2Gain.toFixed(2)}%</span>
+              <span className={clsx("tabular-nums", isRiding ? "text-emerald-400 font-semibold" : "text-emerald-600/70")}>
+                +{tp2Gain.toFixed(2)}%
+              </span>
               {leverage > 1 && (
-                <span className="text-emerald-900 tabular-nums">+{(tp2Gain * leverage).toFixed(1)}% lev</span>
+                <span className={clsx("tabular-nums", isRiding ? "text-emerald-700" : "text-emerald-900")}>
+                  +{(tp2Gain * leverage).toFixed(1)}% lev
+                </span>
               )}
             </div>
           </div>
         )}
-        {/* SL */}
+        {/* SL — show breakeven when riding */}
         <div className="flex items-center gap-2">
-          <span className="text-gray-600 w-10 shrink-0">SL</span>
-          <span className="font-mono text-gray-600 tabular-nums">{fmt(signal.sl)}</span>
-          <div className="ml-auto">
-            <span className="text-red-600 tabular-nums">−{slLoss.toFixed(2)}%</span>
+          <span className={clsx("w-10 shrink-0", isRiding ? "text-yellow-700" : "text-gray-600")}>SL</span>
+          <span className={clsx("font-mono tabular-nums", isRiding ? "text-yellow-700" : "text-gray-600")}>
+            {fmt(activeSl)}
+          </span>
+          <div className="ml-auto flex items-center gap-1.5">
+            {isRiding ? (
+              <span className="text-yellow-700 text-[10px]">breakeven</span>
+            ) : (
+              <span className="text-red-600 tabular-nums">−{slLoss.toFixed(2)}%</span>
+            )}
           </div>
         </div>
       </div>

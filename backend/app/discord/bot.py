@@ -375,6 +375,39 @@ async def send_outcome_notification(sig, result: str, price: float | None):
         logger.error(f"send_outcome_notification failed: {e}")
 
 
+async def send_tp1_notification(sig, breakeven_sl: float):
+    """Send a TP1-hit embed — SL moved to breakeven, riding to TP2."""
+    global _client
+    if not settings.discord_bot_token or not settings.discord_channel_id:
+        return
+    try:
+        if _client is None or _client.is_closed():
+            await _ensure_client()
+        channel = _client.get_channel(int(settings.discord_channel_id))
+        if channel is None:
+            channel = await _client.fetch_channel(int(settings.discord_channel_id))
+
+        tp2_str = f"`${sig.tp2:,.4f}`" if sig.tp2 and sig.tp2 > 0 else "—"
+        tp1_gain = abs(sig.tp1 - sig.entry_price) / sig.entry_price * 100
+
+        embed = discord.Embed(
+            title=f"🎯 TP1 Hit — Riding to TP2  ·  {sig.direction}  —  {sig.symbol}/USDT  [{sig.timeframe}]",
+            color=0xF5A623,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.add_field(name="TP1 hit", value=f"`${sig.tp1:,.4f}` (+{tp1_gain:.2f}%)", inline=True)
+        embed.add_field(name="TP2 target", value=tp2_str, inline=True)
+        embed.add_field(name="SL → Breakeven", value=f"`${breakeven_sl:,.4f}`", inline=True)
+        embed.add_field(name="Entry", value=f"`${sig.entry_price:,.4f}`", inline=True)
+        embed.add_field(name="Confidence", value=f"`{sig.confidence:.0f}%`", inline=True)
+        embed.set_footer(text=f"Mhoo Signal Bot · tp1-hit · signal #{sig.id}")
+
+        await channel.send(embed=embed)
+        logger.info(f"TP1 notification sent: {sig.symbol} {sig.direction}")
+    except Exception as e:
+        logger.error(f"send_tp1_notification failed: {e}")
+
+
 async def start_bot():
     """Call once at app startup — starts the Discord client and announces the server IP."""
     if not settings.discord_bot_token:

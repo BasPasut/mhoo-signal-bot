@@ -41,6 +41,15 @@ def _migrate(eng):
         if "tier" not in cols:
             conn.execute(text("ALTER TABLE signal ADD COLUMN tier INTEGER"))
             conn.commit()
+        if "tp1_hit" not in cols:
+            conn.execute(text("ALTER TABLE signal ADD COLUMN tp1_hit BOOLEAN NOT NULL DEFAULT 0"))
+            conn.commit()
+        if "tp1_hit_at" not in cols:
+            conn.execute(text("ALTER TABLE signal ADD COLUMN tp1_hit_at DATETIME"))
+            conn.commit()
+        if "breakeven_sl" not in cols:
+            conn.execute(text("ALTER TABLE signal ADD COLUMN breakeven_sl FLOAT"))
+            conn.commit()
 
         # trade_order table — auto-execution layer
         if "trade_order" not in inspect(eng).get_table_names():
@@ -110,9 +119,14 @@ class Signal(SQLModel, table=True):
     sl_method: Optional[str] = None    # "atr_1h" | "structural_15m"
     tier: Optional[int] = None         # 1 | 2 | 3 (liquidity tier)
     discord_sent: bool = False
-    result: Optional[str] = None       # "win" | "loss" | "expired" | None
+    result: Optional[str] = None       # "win" | "loss" | "expired" | "breakeven" | None
     result_at: Optional[datetime] = None
     result_price: Optional[float] = None
+
+    # TP1 hit / riding to TP2 state
+    tp1_hit: bool = Field(default=False)
+    tp1_hit_at: Optional[datetime] = None
+    breakeven_sl: Optional[float] = None   # SL price after TP1 (entry ± fee buffer)
 
     @property
     def triggers(self) -> List[dict]:
