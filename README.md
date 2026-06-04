@@ -7,9 +7,9 @@ High-accuracy crypto futures signal bot for Binance USDT-M perpetuals. Sends ric
 ```
 Binance Futures API + News APIs
           ↓
-Python (FastAPI + Signal Engine + Discord bot)   ← Fly.io (free)
+Python (FastAPI + Signal Engine + Discord bot)   ← local / VPS
           ↓ REST + WebSocket
-Next.js Dashboard                                 ← Vercel (free)
+Next.js Dashboard                                 ← local
           ↓
 Discord Server                                    ← your server
 ```
@@ -25,7 +25,7 @@ Discord Server                                    ← your server
 | Scheduler | APScheduler (in-process) |
 | Frontend | Next.js 14 + TailwindCSS + Recharts |
 | Discord | discord.py |
-| Hosting | Fly.io (backend, free + persistent volume) + Vercel (frontend, free) |
+| Hosting | Local / VPS (backend) + local (frontend) |
 
 ---
 
