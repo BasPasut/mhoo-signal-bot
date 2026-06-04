@@ -132,18 +132,25 @@ def _surgical_swing_sl(df: pd.DataFrame, direction: str, lookback: int = 20) -> 
 def _position_risk_pct(confidence: float, rr: float, risk_profile: str,
                        equity_risk_cap: float = 0.02) -> float:
     """
-    Fractional Kelly position sizing, capped at the tier equity_risk_cap.
-    equity_risk_cap: tier-based budget (Tier1=0.025, Tier2=0.020, Tier3=0.015).
-    """
-    p = 0.35 + (confidence / 100) * 0.28       # win-rate proxy from confidence
-    b = max(rr, 0.1)
-    kelly = (p * (b + 1) - 1) / b
-    frac  = kelly * 0.25                        # 25% fractional Kelly
+    Fixed risk % per signal tier (ALPHA/PRIME/SETUP), scaled by risk profile.
 
-    profile_scale = {"conservative": 0.50, "balanced": 0.80, "aggressive": 1.00}
-    scale = profile_scale.get(risk_profile, 0.80)
-    cap   = equity_risk_cap * 100 * scale       # convert to %, apply profile scaling
-    return max(0.0, min(cap, round(frac * 100, 2)))
+    Replaces Fractional Kelly which was unreliable without sufficient historical
+    win-rate data and produced over-sized positions (e.g. 5.86% per trade).
+
+    Tier thresholds: ALPHA ≥ 80%, PRIME ≥ 60%, SETUP < 60%
+    Defaults: ALPHA=1.5%, PRIME=1.0%, SETUP=0.5%
+    Profile scaling: conservative×0.67, balanced×1.0, aggressive×1.33 (hard cap 5%)
+    """
+    from app.core.config_store import get_risk_per_tier
+    risk_map = get_risk_per_tier()
+
+    grade = "ALPHA" if confidence >= 80 else "PRIME" if confidence >= 60 else "SETUP"
+    base_risk = risk_map.get(grade, 1.0)
+
+    profile_scale = {"conservative": 0.67, "balanced": 1.0, "aggressive": 1.33}
+    scale = profile_scale.get(risk_profile, 1.0)
+
+    return round(min(base_risk * scale, 5.0), 2)
 
 
 # ── Bars-per-hour lookup (ML feature store) ───────────────────────────────────

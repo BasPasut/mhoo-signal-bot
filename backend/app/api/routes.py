@@ -14,6 +14,7 @@ from app.core.config_store import (
     get_signal_tiers, set_signal_tiers,
     get_execution_mode, set_execution_mode,
     get_starting_balance, set_starting_balance,
+    get_risk_per_tier, set_risk_per_tier,
 )
 from app.core.settings import settings
 from app.scheduler.runner import run_now, update_interval, scheduler
@@ -260,6 +261,7 @@ async def get_config_endpoint():
             "live": bool(settings.binance_api_key),
         },
         "starting_balance": get_starting_balance(),
+        "risk_per_tier": get_risk_per_tier(),
     }
 
 
@@ -354,6 +356,18 @@ async def update_config(body: dict, background_tasks: BackgroundTasks):
         set_starting_balance(bal)
         if old != bal:
             changes.append({"field": "starting_balance", "old": old, "new": bal})
+
+    if "risk_per_tier" in body:
+        rpt = body["risk_per_tier"]
+        for k in ("ALPHA", "PRIME", "SETUP"):
+            if k not in rpt:
+                raise HTTPException(400, f"risk_per_tier missing key: {k}")
+            v = float(rpt[k])
+            if not (0.1 <= v <= 10.0):
+                raise HTTPException(400, f"risk_per_tier.{k} must be 0.1–10%")
+        old = get_risk_per_tier()
+        set_risk_per_tier({k: float(rpt[k]) for k in ("ALPHA", "PRIME", "SETUP")})
+        changes.append({"field": "risk_per_tier", "old": old, "new": rpt})
 
     if changes:
         background_tasks.add_task(send_config_change, changes)

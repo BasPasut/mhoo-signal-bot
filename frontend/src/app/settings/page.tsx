@@ -19,6 +19,7 @@ export default function SettingsPage() {
   const [priorityBias, setPriorityBias] = useState<"Highest Confidence" | "Lowest Risk">("Highest Confidence");
   const [executionMode, setExecutionMode] = useState<"disabled" | "testnet" | "live">("disabled");
   const [startingBalance, setStartingBalance] = useState<number>(10000);
+  const [riskPerTier, setRiskPerTier] = useState({ ALPHA: 1.5, PRIME: 1.0, SETUP: 0.5 });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -37,6 +38,7 @@ export default function SettingsPage() {
         setPriorityBias(c.priority_bias ?? "Highest Confidence");
         setExecutionMode(c.execution_mode ?? "disabled");
         setStartingBalance(c.starting_balance ?? 10000);
+        setRiskPerTier(c.risk_per_tier ?? { ALPHA: 1.5, PRIME: 1.0, SETUP: 0.5 });
       })
       .catch((err) => {
         setLoadError(`Cannot connect to backend: ${err.message}`);
@@ -70,6 +72,7 @@ export default function SettingsPage() {
         priority_bias: priorityBias,
         execution_mode: executionMode,
         starting_balance: startingBalance,
+        risk_per_tier: riskPerTier,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -337,6 +340,55 @@ export default function SettingsPage() {
         <p className="text-xs text-gray-600">
           Current: <span className="text-white font-medium">${startingBalance.toLocaleString()}</span> USDT
         </p>
+      </div>
+
+      {/* Risk per tier */}
+      <div className="card space-y-4">
+        <div>
+          <h2 className="font-semibold text-white">Risk % per signal tier</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            % of portfolio risked per trade. Higher-confidence signals get more size.
+            If SL is hit, you lose exactly this % of your current balance.
+          </p>
+        </div>
+        {([
+          { key: "ALPHA", label: "ALPHA", range: "≥ 80%", color: "emerald" },
+          { key: "PRIME", label: "PRIME", range: "60–79%", color: "yellow" },
+          { key: "SETUP", label: "SETUP", range: "< 60%",  color: "orange" },
+        ] as const).map(({ key, label, range, color }) => {
+          const val = riskPerTier[key];
+          const lossUsd = (startingBalance * val / 100).toFixed(0);
+          const textColor = color === "emerald" ? "text-emerald-400" : color === "yellow" ? "text-yellow-400" : "text-orange-400";
+          return (
+            <div key={key} className="space-y-1">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-bold ${textColor}`}>{label}</span>
+                  <span className="text-xs text-gray-600">{range}</span>
+                </div>
+                <span className="text-xs text-gray-500">
+                  max loss <span className="text-white font-medium">${lossUsd}</span> per trade
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={0.1}
+                  max={5}
+                  step={0.1}
+                  value={val}
+                  onChange={(e) => setRiskPerTier(prev => ({ ...prev, [key]: parseFloat(e.target.value) }))}
+                  className={`flex-1 ${color === "emerald" ? "accent-emerald-500" : color === "yellow" ? "accent-yellow-500" : "accent-orange-500"}`}
+                />
+                <span className="text-sm text-gray-300 w-12 text-right">{val.toFixed(1)}%</span>
+              </div>
+            </div>
+          );
+        })}
+        <div className="rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 text-xs text-gray-400 space-y-0.5">
+          <div>Worst case (all {5} positions lose): <span className="text-white font-medium">${(startingBalance * (riskPerTier.ALPHA * 5) / 100).toFixed(0)}</span> – <span className="text-white font-medium">${(startingBalance * (riskPerTier.PRIME * 5) / 100).toFixed(0)}</span> loss</div>
+          <div className="text-gray-600">Conservative ×0.67 · Balanced ×1.0 · Aggressive ×1.33 applied on top</div>
+        </div>
       </div>
 
       {/* Discord test */}

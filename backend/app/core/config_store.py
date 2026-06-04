@@ -109,3 +109,29 @@ def get_starting_balance() -> float:
 def set_starting_balance(balance: float):
     assert balance >= 1, "starting_balance must be >= 1"
     set_config("starting_balance", str(balance))
+
+
+# Risk % per signal tier (fixed, replaces Kelly)
+_DEFAULT_RISK_PER_TIER = {"ALPHA": 1.5, "PRIME": 1.0, "SETUP": 0.5}
+
+
+def get_risk_per_tier() -> dict[str, float]:
+    raw = get_config("risk_per_tier", "")
+    if not raw:
+        return dict(_DEFAULT_RISK_PER_TIER)
+    try:
+        parsed = {}
+        for part in raw.split(","):
+            k, v = part.strip().split(":")
+            parsed[k.strip()] = float(v.strip())
+        return parsed
+    except Exception:
+        return dict(_DEFAULT_RISK_PER_TIER)
+
+
+def set_risk_per_tier(tiers: dict[str, float]):
+    for k in ("ALPHA", "PRIME", "SETUP"):
+        assert k in tiers, f"Missing tier: {k}"
+        assert 0.1 <= tiers[k] <= 10.0, f"{k} risk must be 0.1–10%"
+    raw = ",".join(f"{k}:{tiers[k]}" for k in ("ALPHA", "PRIME", "SETUP"))
+    set_config("risk_per_tier", raw)
