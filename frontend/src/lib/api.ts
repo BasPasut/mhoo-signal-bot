@@ -10,7 +10,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  signals: (params?: Record<string, string | number>) => {
+  signals: (params?: Record<string, string | number | boolean>) => {
     const qs = params ? "?" + new URLSearchParams(params as any).toString() : "";
     return request<any[]>(`/signals${qs}`);
   },
@@ -21,4 +21,15 @@ export const api = {
   scanNow: () => request<any>("/scan/now", { method: "POST" }),
   price: (symbol: string) => request<any>(`/price/${symbol}`),
   health: () => request<any>("/health"),
+  testDiscord: () => request<any>("/discord/test", { method: "POST" }),
+  calibration: () => request<any[]>("/signals/calibration"),
+  performance: () => request<any[]>("/performance"),
+  mlStats: () => request<any>("/ml/stats"),
+  mlExport: () => request<any[]>("/ml/export"),
+  equityCurve: () => request<{ summary: any; curve: any[] }>("/performance/equity-curve"),
+  analytics: () => request<any>("/signals/analytics"),
+  orders: (params?: { signal_id?: number }) => {
+    const qs = params?.signal_id ? `?signal_id=${params.signal_id}` : "";
+    return request<any[]>(`/orders${qs}`);
+  },
 };

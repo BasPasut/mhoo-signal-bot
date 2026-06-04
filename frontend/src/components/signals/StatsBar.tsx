@@ -6,39 +6,45 @@ interface StatsBarProps {
     total: number;
     wins: number;
     losses: number;
+    open: number;
     win_rate: number;
-    longs: number;
-    shorts: number;
     avg_confidence: number;
   } | null;
+  loading?: boolean;
 }
 
-function Stat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return (
-    <div className="card flex-1 min-w-[110px]">
-      <div className="text-xs text-gray-500 mb-1">{label}</div>
-      <div className="text-xl font-bold text-white">{value}</div>
-      {sub && <div className="text-xs text-gray-600 mt-0.5">{sub}</div>}
-    </div>
+export function StatsBar({ stats, loading }: StatsBarProps) {
+  if (loading) return (
+    <div className="h-3.5 w-40 bg-gray-800 rounded animate-pulse" />
   );
-}
-
-export function StatsBar({ stats }: StatsBarProps) {
   if (!stats) return null;
+
+  const decided = stats.wins + stats.losses;
+  const wrColor =
+    decided === 0 ? "text-gray-600" :
+    stats.win_rate >= 60 ? "text-emerald-400" :
+    stats.win_rate >= 45 ? "text-yellow-400" :
+    "text-red-400";
+
   return (
-    <div className="flex flex-wrap gap-3">
-      <Stat label="Total signals" value={stats.total} />
-      <Stat
-        label="Win rate"
-        value={`${stats.win_rate}%`}
-        sub={`${stats.wins}W / ${stats.losses}L`}
-      />
-      <Stat label="Avg confidence" value={`${stats.avg_confidence}%`} />
-      <Stat
-        label="Direction split"
-        value={`${stats.longs}L / ${stats.shorts}S`}
-        sub="long / short"
-      />
+    <div className="flex items-center gap-2 text-xs text-gray-600 flex-wrap">
+      {decided > 0 ? (
+        <span>
+          <span className={clsx("font-semibold", wrColor)}>{stats.win_rate}%</span>
+          <span className="ml-1 text-gray-700">{stats.wins}W · {stats.losses}L</span>
+        </span>
+      ) : (
+        <span className="text-gray-700">no results yet</span>
+      )}
+      <span className="text-gray-800">·</span>
+      <span>
+        <span className={clsx("font-semibold", stats.open > 0 ? "text-sky-400" : "text-gray-500")}>
+          {stats.open}
+        </span>
+        <span className="ml-1">open</span>
+      </span>
+      <span className="text-gray-800">·</span>
+      <span>{stats.total} total</span>
     </div>
   );
 }

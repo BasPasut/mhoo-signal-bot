@@ -1,6 +1,6 @@
-# Binance Futures Signal Bot
+# Mhoo Signal Bot
 
-High-accuracy crypto futures signal bot. Sends signals to Discord and displays a live dashboard.
+High-accuracy crypto futures Mhoo signal bot. Sends signals to Discord and displays a live dashboard.
 
 ## Architecture
 

@@ -3,15 +3,47 @@
 @tailwind utilities;
 
 @layer base {
+  * { @apply box-border; }
+  html { @apply scroll-smooth; }
   body { @apply antialiased; }
+
+  /* Improve default focus outlines */
+  :focus-visible { @apply outline outline-2 outline-offset-2 outline-emerald-500; }
 }
 
 @layer components {
+  /* Core card */
   .card { @apply bg-gray-900 border border-gray-800 rounded-xl p-4; }
-  .badge-long { @apply inline-flex items-center gap-1 bg-emerald-900/40 text-emerald-400 border border-emerald-700/50 text-xs font-semibold px-2 py-0.5 rounded-full; }
-  .badge-short { @apply inline-flex items-center gap-1 bg-orange-900/40 text-orange-400 border border-orange-700/50 text-xs font-semibold px-2 py-0.5 rounded-full; }
-  .btn-primary { @apply bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors; }
-  .btn-ghost { @apply text-gray-400 hover:text-gray-100 text-sm px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors; }
-  .input { @apply bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-emerald-500 w-full; }
+
+  /* Buttons */
+  .btn-primary {
+    @apply bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700
+           text-white text-sm font-medium px-4 py-2 rounded-lg
+           transition-colors cursor-pointer select-none;
+  }
+  .btn-ghost {
+    @apply text-gray-400 hover:text-gray-100 text-sm px-3 py-1.5 rounded-lg
+           hover:bg-gray-800 transition-colors cursor-pointer select-none;
+  }
+
+  /* Form inputs */
+  .input {
+    @apply bg-gray-800 border border-gray-700 rounded-lg px-3 py-2
+           text-sm text-gray-100 w-full
+           focus:outline-none focus:border-emerald-500 transition-colors;
+  }
   .label { @apply text-xs text-gray-500 font-medium uppercase tracking-wide mb-1 block; }
+
+  /* Badges */
+  .badge-long  { @apply inline-flex items-center gap-1 bg-emerald-900/40 text-emerald-400 border border-emerald-700/50 text-xs font-semibold px-2 py-0.5 rounded-full; }
+  .badge-short { @apply inline-flex items-center gap-1 bg-orange-900/40  text-orange-400  border border-orange-700/50  text-xs font-semibold px-2 py-0.5 rounded-full; }
 }
+
+/* Smooth number transitions */
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* Custom scrollbar — dark themed */
+::-webkit-scrollbar        { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: #374151; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #4b5563; }

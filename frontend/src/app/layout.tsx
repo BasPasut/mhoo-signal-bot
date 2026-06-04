@@ -1,11 +1,15 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Nav } from "@/components/layout/Nav";
 
 export const metadata: Metadata = {
-  title: "Signal Bot",
-  description: "Binance futures trading signal bot",
-  viewport: "width=device-width, initial-scale=1",
+  title: "Mhoo Signal Bot",
+  description: "Mhoo Signal Bot — Binance futures trading signals",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -13,7 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="bg-gray-950 text-gray-100 min-h-screen">
         <Nav />
-        <main className="max-w-7xl mx-auto px-4 py-6">{children}</main>
+        <main className="max-w-4xl mx-auto px-4 py-6">{children}</main>
       </body>
     </html>
   );

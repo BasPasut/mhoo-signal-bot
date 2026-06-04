@@ -25,3 +25,25 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Logs
+*.log
+*.err
+
+# Claude Code memory
+.claude/
+
+# Backtest outputs
+backend/backtest_cache/
+backend/backtest_v7*.csv
+backend/backtest_v7.py
+backend/ml_history/
+backend/sre/
+
+# Frontend build artifacts
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+frontend/public/
+
+# Watchdog
+watchdog.ps1

@@ -32,10 +32,13 @@ export default function HistoryPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">History</h1>
-          <p className="text-sm text-gray-500 mt-0.5">All past signals</p>
+          <div className="flex items-baseline gap-3 flex-wrap">
+            <h1 className="text-base font-bold text-white">History</h1>
+            <StatsBar stats={stats} />
+          </div>
+          <p className="text-xs text-gray-700 mt-1">All past signals</p>
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -55,8 +58,6 @@ export default function HistoryPage() {
           </select>
         </div>
       </div>
-
-      <StatsBar stats={stats} />
 
       {loading ? (
         <div className="text-gray-500 text-sm animate-pulse">Loading...</div>

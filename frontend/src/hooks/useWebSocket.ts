@@ -31,8 +31,17 @@ export interface Signal {
   volume_ratio?: number;
   funding_rate?: number;
   fear_greed?: number;
+  leverage?: number;
   discord_sent: boolean;
   result?: string;
+  result_at?: string;
+  result_price?: number;
+  // Sizing / entry
+  position_risk_pct?: number;
+  breakeven_trigger?: number;
+  trailing_stop_atr?: number;
+  // Multi-TF: present when 2+ entry timeframes confirmed the same direction
+  confirmed_timeframes?: string[];
 }
 
 let _connected = false;
@@ -66,7 +75,7 @@ export function useWebSocket(onSignal: (s: Signal) => void) {
     socket.onopen = () => { notifyStatus(true); };
     socket.onclose = () => {
       notifyStatus(false);
-      reconnectTimer.current = setTimeout(connect, 3000);
+      reconnectTimer.current = setTimeout(connect, 8000);
     };
     socket.onerror = () => socket.close();
     socket.onmessage = (e) => {

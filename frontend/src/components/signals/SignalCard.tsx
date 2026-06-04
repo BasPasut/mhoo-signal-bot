@@ -1,150 +1,408 @@
 "use client";
 import { Signal } from "@/hooks/useWebSocket";
 import clsx from "clsx";
-import { format } from "date-fns";
+import { useState, memo } from "react";
 
-function ConfidenceBar({ value }: { value: number }) {
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+function fmt(v: number): string {
+  return v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+}
+
+function fmtDuration(a: string, b: string): string {
+  const ms = new Date(b).getTime() - new Date(a).getTime();
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function tier(conf: number) {
+  if (conf >= 80) return { label: "ALPHA", color: "text-emerald-400" };
+  if (conf >= 60) return { label: "PRIME", color: "text-yellow-400" };
+  return { label: "SETUP", color: "text-orange-400" };
+}
+
+function plainReason(raw: string): string {
+  const l = raw.toLowerCase();
+  if (
+    l.includes("outside kill zone") || l.includes("no ob/fvg") ||
+    l.includes("regime cap") || l.includes("momentum dedup") ||
+    l.includes("correlated") || l.includes("structure-less")
+  ) return "";
+  if (l.includes("multi-tf"))     return "Multiple timeframes confirm direction";
+  if (l.includes("ema200") && (l.includes("bull") || l.includes("price >"))) return "4H trend bullish";
+  if (l.includes("ema200") && (l.includes("bear") || l.includes("price <"))) return "4H trend bearish";
+  if (l.includes("macd") && l.includes("bull"))           return "1H momentum turning up";
+  if (l.includes("macd") && l.includes("bear"))           return "1H momentum turning down";
+  if (l.includes("bb squeeze") || l.includes("bb band"))  return "Volatility breakout";
+  if (l.includes("hybrid l3") || (l.includes("rsi") && l.includes("fvg"))) return "RSI at supply/demand zone";
+  if (l.includes("fvg"))                                  return "Fair value gap (high-prob entry)";
+  if (l.includes("order block"))                          return "Institutional order block";
+  if (l.includes("kill zone") && l.includes("+"))         return "Active session (London / NY)";
+  if (l.includes("liquidity sweep"))                      return "Liquidity sweep → reversal setup";
+  if (l.includes("vwap"))                                 return "Price on right side of VWAP";
+  if (l.includes("downtrend structure"))                  return "Lower highs / lower lows confirmed";
+  if (l.includes("breakout above"))                       return "Breaking above resistance";
+  if (l.includes("breakdown below"))                      return "Breaking below support";
+  if (l.includes("evening star"))                         return "Bearish reversal candle";
+  if (l.includes("morning star"))                         return "Bullish reversal candle";
+  if (l.includes("adx accelerating"))                     return "Trend strength accelerating";
+  if (l.includes("ema stack"))                            return "Short-term EMAs confirm trend";
+  return raw.split("|")[0].split("—")[0].trim();
+}
+
+function fmtAge(createdAt: string): string {
+  const ms = Date.now() - new Date(createdAt).getTime();
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  return h > 0 ? `${h}h ${m}m ago` : `${m}m ago`;
+}
+
+function CopyBtn({ label, value }: { label: string; value: string }) {
+  const [ok, setOk] = useState(false);
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+    <button
+      onClick={() => {
+        navigator.clipboard?.writeText(value);
+        setOk(true);
+        setTimeout(() => setOk(false), 1500);
+      }}
+      className="hover:text-gray-300 transition-colors"
+    >
+      {ok ? `✓ ${label}` : label}
+    </button>
+  );
+}
+
+// ── P&L progress bar ──────────────────────────────────────────────────────────
+// Spans SL → entry → TP1 with a dot showing current price position.
+
+function PnlBar({
+  pnl,
+  tp1Gain,
+  slLoss,
+}: {
+  pnl: number;
+  tp1Gain: number;
+  slLoss: number;
+}) {
+  const total     = slLoss + tp1Gain;
+  const entryPct  = (slLoss / total) * 100;           // where entry sits on 0-100 scale
+  const currentPct = Math.max(1, Math.min(99, ((pnl + slLoss) / total) * 100));
+  const isProfit   = pnl >= 0;
+
+  return (
+    <div className="mt-2.5 mb-1">
+      {/* Track */}
+      <div className="relative h-1 bg-gray-800 rounded-full">
+        {/* Filled region: entry → current */}
+        {isProfit ? (
+          <div
+            className="absolute inset-y-0 bg-emerald-600/70 rounded-full"
+            style={{ left: `${entryPct}%`, width: `${Math.max(0, currentPct - entryPct)}%` }}
+          />
+        ) : (
+          <div
+            className="absolute inset-y-0 bg-red-700/70 rounded-full"
+            style={{ left: `${Math.max(0, currentPct)}%`, width: `${entryPct - Math.max(0, currentPct)}%` }}
+          />
+        )}
+        {/* Entry tick */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 w-px h-2.5 bg-gray-500"
+          style={{ left: `${entryPct}%` }}
+        />
+        {/* Current price dot */}
         <div
           className={clsx(
-            "h-full rounded-full transition-all",
-            value >= 80 ? "bg-emerald-400" : value >= 70 ? "bg-yellow-400" : "bg-orange-400"
+            "absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border-2 shadow",
+            isProfit
+              ? "bg-emerald-400 border-emerald-700"
+              : "bg-red-400 border-red-800"
           )}
-          style={{ width: `${value}%` }}
+          style={{ left: `calc(${currentPct}% - 5px)` }}
         />
       </div>
-      <span className="text-xs font-semibold text-gray-300 w-10 text-right">
-        {value.toFixed(0)}%
-      </span>
-    </div>
-  );
-}
-
-function PriceRow({
-  label,
-  price,
-  base,
-  color,
-}: {
-  label: string;
-  price: number;
-  base: number;
-  color: string;
-}) {
-  const pct = ((price - base) / base) * 100;
-  return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-gray-500">{label}</span>
-      <div className="flex items-center gap-2">
-        <span className="font-mono text-gray-200">${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
-        <span className={clsx("text-xs font-medium", color)}>
-          {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%
-        </span>
+      {/* Labels */}
+      <div className="flex justify-between mt-1 text-[10px] text-gray-700">
+        <span>SL −{slLoss.toFixed(1)}%</span>
+        <span className="text-gray-600">entry</span>
+        <span>TP1 +{tp1Gain.toFixed(1)}%</span>
       </div>
     </div>
   );
 }
 
-export function SignalCard({ signal, isNew }: { signal: Signal; isNew?: boolean }) {
-  const isLong = signal.direction === "LONG";
+// ── Main card ─────────────────────────────────────────────────────────────────
+
+
+export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice }: { signal: Signal; isNew?: boolean; livePrice?: number | null }) {
+  const isLong     = signal.direction === "LONG";
+  const isOpen     = !signal.result;
+  const isWin      = signal.result === "win";
+  const age        = fmtAge(signal.created_at);
+  const leverage   = signal.leverage ?? 1;
+  const [expanded, setExpanded] = useState(false);
+  const t = tier(signal.confidence);
+
+  // ── P&L calculations ───────────────────────────────────────────────────────
+  const tp1Gain = isLong
+    ? (signal.tp1 - signal.entry_price) / signal.entry_price * 100
+    : (signal.entry_price - signal.tp1) / signal.entry_price * 100;
+
+  const tp2Gain = signal.tp2 > 0
+    ? (isLong
+        ? (signal.tp2 - signal.entry_price) / signal.entry_price * 100
+        : (signal.entry_price - signal.tp2) / signal.entry_price * 100)
+    : null;
+
+  const slLoss = Math.abs(signal.sl - signal.entry_price) / signal.entry_price * 100;
+
+  const resolvedPrice = livePrice ?? null;
+  const livePnl = isOpen && resolvedPrice !== null
+    ? (isLong
+        ? (resolvedPrice - signal.entry_price)
+        : (signal.entry_price - resolvedPrice)) / signal.entry_price * 100
+    : null;
+
+  // ── Accent border ──────────────────────────────────────────────────────────
+  // Open: switch from direction color to P&L color once price is loaded
+  const borderColor = !isOpen
+    ? "border-l-gray-700"
+    : livePnl === null
+      ? (isLong ? "border-l-emerald-700" : "border-l-red-700")
+      : livePnl >= 0 ? "border-l-emerald-500" : "border-l-red-600";
+
+  const reasons = (signal.triggers ?? [])
+    .map(tr => plainReason(tr.label))
+    .filter(Boolean)
+    .slice(0, 4);
 
   return (
-    <div
-      className={clsx(
-        "card border-l-4 transition-all",
-        isLong ? "border-l-emerald-500" : "border-l-orange-500",
-        isNew && "ring-1 ring-emerald-500/30 animate-pulse-once"
+    <div className={clsx(
+      "bg-gray-900 border border-gray-800 border-l-2 rounded-lg overflow-hidden transition-shadow",
+      borderColor,
+      !isOpen && "opacity-65",
+      isNew && "ring-1 ring-emerald-800/40 shadow-[0_0_12px_rgba(52,211,153,0.06)]",
+    )}>
+
+      {/* ── Resolved banner (History page only) ── */}
+      {!isOpen && (
+        <div className={clsx(
+          "px-4 py-1 text-[11px] font-bold tracking-wide flex items-center justify-between",
+          isWin ? "bg-emerald-950/50 text-emerald-600" : "bg-red-950/50 text-red-700"
+        )}>
+          <span>{isWin ? "WIN" : "STOPPED OUT"}</span>
+          {signal.result_at && (
+            <span className="font-normal text-gray-700">{fmtDuration(signal.created_at, signal.result_at)}</span>
+          )}
+        </div>
       )}
-    >
-      {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className={clsx("text-lg font-bold", isLong ? "badge-long" : "badge-short")}>
-            {isLong ? "▲" : "▼"} {signal.direction}
-          </span>
-          <span className="font-bold text-white text-lg">{signal.symbol}/USDT</span>
-          <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full">
-            {signal.timeframe}
-          </span>
-        </div>
-        <div className="text-right">
-          <div className="text-xs text-gray-500">
-            {format(new Date(signal.created_at), "MMM d, HH:mm")}
+
+      {/* ── Header ── */}
+      <div className="px-4 pt-3.5 pb-2 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <span className="font-mono font-bold text-white text-sm tracking-wide leading-none">
+              {signal.symbol}
+            </span>
+            <span className={clsx(
+              "text-xs font-bold px-1.5 py-0.5 rounded",
+              isLong
+                ? "bg-emerald-950 text-emerald-400"
+                : "bg-red-950 text-red-400"
+            )}>
+              {signal.direction}
+            </span>
+            <span className="text-[11px] text-gray-600">{signal.timeframe}</span>
           </div>
-          <div className="text-xs text-gray-600 capitalize">{signal.risk_profile}</div>
         </div>
-      </div>
-
-      {/* Confidence */}
-      <div className="mb-3">
-        <div className="label">Confidence</div>
-        <ConfidenceBar value={signal.confidence} />
-      </div>
-
-      {/* Entry + TP/SL */}
-      <div className="space-y-1.5 mb-3">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-500">Entry zone</span>
-          <span className="font-mono text-gray-200 text-xs">
-            ${signal.entry_low.toLocaleString()} – ${signal.entry_high.toLocaleString()}
-          </span>
-        </div>
-        <PriceRow label="TP1" price={signal.tp1} base={signal.entry_price} color={isLong ? "text-emerald-400" : "text-orange-400"} />
-        <PriceRow label="TP2" price={signal.tp2} base={signal.entry_price} color={isLong ? "text-emerald-400" : "text-orange-400"} />
-        <PriceRow label="Stop loss" price={signal.sl} base={signal.entry_price} color="text-red-400" />
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-500">Risk / Reward</span>
-          <span className="font-semibold text-gray-200">1 : {signal.risk_reward}</span>
-        </div>
-      </div>
-
-      {/* Score breakdown */}
-      <div className="grid grid-cols-4 gap-2 mb-3">
-        {[
-          { label: "TA", value: signal.ta_score },
-          { label: "Pattern", value: signal.pattern_score },
-          { label: "ML", value: signal.ml_score },
-          { label: "Context", value: signal.context_score },
-        ].map((s) => (
-          <div key={s.label} className="bg-gray-800/60 rounded-lg p-2 text-center">
-            <div className="text-xs text-gray-500">{s.label}</div>
-            <div className="font-semibold text-sm text-gray-200">{s.value.toFixed(0)}</div>
+        <div className="text-right shrink-0">
+          <div className="flex items-center gap-1.5 justify-end">
+            <span className={clsx("text-xs font-bold", t.color)}>{t.label}</span>
+            <span className="text-xs text-gray-500 tabular-nums">{signal.confidence.toFixed(0)}%</span>
           </div>
-        ))}
+          <div className="text-[11px] text-gray-700 mt-0.5 tabular-nums">{age}</div>
+        </div>
       </div>
 
-      {/* Triggers */}
-      {signal.triggers && signal.triggers.length > 0 && (
-        <div>
-          <div className="label">Signals</div>
-          <div className="space-y-0.5">
-            {signal.triggers.slice(0, 5).map((t, i) => (
-              <div key={i} className="flex items-center gap-1.5 text-xs text-gray-400">
-                <span className={clsx(
-                  "w-1.5 h-1.5 rounded-full flex-shrink-0",
-                  t.dir === "long" ? "bg-emerald-500" : t.dir === "short" ? "bg-orange-500" : "bg-gray-500"
-                )} />
-                {t.label}
+      {/* ── Live position box (open only) ── */}
+      {isOpen && (
+        <div className="mx-4 mb-3">
+          {livePrice == null ? (
+            <div className="flex items-center gap-2 bg-gray-800/30 border border-gray-800 rounded-lg px-3 py-2.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-700 shrink-0" />
+              <span className="text-xs text-gray-700">Fetching live price…</span>
+            </div>
+          ) : (
+            <div className={clsx(
+              "rounded-lg px-3 pt-2.5 pb-2 border",
+              livePnl !== null && livePnl >= 0
+                ? "bg-emerald-950/40 border-emerald-900/50"
+                : "bg-red-950/40 border-red-900/50"
+            )}>
+              {/* Price + P&L row */}
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className={clsx(
+                      "w-1.5 h-1.5 rounded-full shrink-0",
+                      livePnl !== null && livePnl >= 0 ? "bg-emerald-400" : "bg-red-400"
+                    )} />
+                    <span className="text-[10px] text-gray-600 font-medium">LIVE</span>
+                  </div>
+                  <div className="font-mono font-bold text-white text-lg tabular-nums leading-none">
+                    ${resolvedPrice !== null ? fmt(resolvedPrice) : ""}
+                  </div>
+                </div>
+
+                {livePnl !== null && (
+                  <div className="text-right">
+                    <div className={clsx(
+                      "font-bold tabular-nums text-xl leading-none",
+                      livePnl >= 0 ? "text-emerald-400" : "text-red-400"
+                    )}>
+                      {livePnl >= 0 ? "+" : ""}{livePnl.toFixed(2)}%
+                    </div>
+                    {leverage > 1 && (
+                      <div className={clsx(
+                        "text-xs tabular-nums mt-0.5",
+                        livePnl >= 0 ? "text-emerald-700" : "text-red-800"
+                      )}>
+                        {livePnl * leverage >= 0 ? "+" : ""}{(livePnl * leverage).toFixed(1)}% lev
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
+
+              {/* Progress bar */}
+              {livePnl !== null && (
+                <PnlBar pnl={livePnl} tp1Gain={tp1Gain} slLoss={slLoss} />
+              )}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Meta */}
-      <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-gray-800 text-xs text-gray-500">
-        {signal.rsi != null && <span>RSI <span className="text-gray-300">{signal.rsi.toFixed(1)}</span></span>}
-        {signal.volume_ratio != null && <span>Vol <span className="text-gray-300">{signal.volume_ratio.toFixed(1)}x</span></span>}
-        {signal.funding_rate != null && (
-          <span>Funding <span className={signal.funding_rate > 0 ? "text-red-400" : "text-emerald-400"}>
-            {signal.funding_rate > 0 ? "+" : ""}{signal.funding_rate.toFixed(4)}%
-          </span></span>
+      {/* ── Price table ── */}
+      <div className="px-4 pb-3 space-y-1.5 text-xs">
+        {/* Entry zone */}
+        <div className="flex items-center gap-2">
+          <span className="text-gray-600 w-10 shrink-0">Entry</span>
+          <span className="font-mono text-gray-500 tabular-nums">
+            {fmt(signal.entry_low)} – {fmt(signal.entry_high)}
+          </span>
+        </div>
+        {/* TP1 */}
+        <div className="flex items-center gap-2">
+          <span className="text-gray-600 w-10 shrink-0">TP1</span>
+          <span className="font-mono text-gray-200 tabular-nums font-medium">{fmt(signal.tp1)}</span>
+          <div className="ml-auto flex items-center gap-2.5">
+            <span className="text-emerald-500 tabular-nums">+{tp1Gain.toFixed(2)}%</span>
+            {leverage > 1 && (
+              <span className="text-emerald-800 tabular-nums">+{(tp1Gain * leverage).toFixed(1)}% lev</span>
+            )}
+          </div>
+        </div>
+        {/* TP2 */}
+        {tp2Gain !== null && (
+          <div className="flex items-center gap-2">
+            <span className="text-gray-600 w-10 shrink-0">TP2</span>
+            <span className="font-mono text-gray-500 tabular-nums">{fmt(signal.tp2)}</span>
+            <div className="ml-auto flex items-center gap-2.5">
+              <span className="text-emerald-600/70 tabular-nums">+{tp2Gain.toFixed(2)}%</span>
+              {leverage > 1 && (
+                <span className="text-emerald-900 tabular-nums">+{(tp2Gain * leverage).toFixed(1)}% lev</span>
+              )}
+            </div>
+          </div>
         )}
-        {signal.fear_greed != null && <span>F&G <span className="text-gray-300">{signal.fear_greed}</span></span>}
-        {signal.discord_sent && <span className="text-emerald-600">✓ Discord</span>}
+        {/* SL */}
+        <div className="flex items-center gap-2">
+          <span className="text-gray-600 w-10 shrink-0">SL</span>
+          <span className="font-mono text-gray-600 tabular-nums">{fmt(signal.sl)}</span>
+          <div className="ml-auto">
+            <span className="text-red-600 tabular-nums">−{slLoss.toFixed(2)}%</span>
+          </div>
+        </div>
       </div>
+
+      {/* ── Footer ── */}
+      <div className="border-t border-gray-800/50 px-4 py-2 flex items-center justify-between">
+        <div className="flex items-center gap-3 text-xs text-gray-600">
+          <span>
+            R/R <span className="text-gray-400 font-medium">{signal.risk_reward}</span>
+          </span>
+          {leverage > 1 && (
+            <>
+              <span className="text-gray-800">·</span>
+              <span>{leverage}× isolated</span>
+            </>
+          )}
+        </div>
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="text-gray-700 hover:text-gray-400 transition-colors text-sm px-1.5 py-0.5 leading-none"
+          aria-label={expanded ? "Collapse" : "Expand"}
+        >
+          {expanded ? "▴" : "▾"}
+        </button>
+      </div>
+
+      {/* ── Expand drawer ── */}
+      {expanded && (
+        <div className="border-t border-gray-800/50 px-4 py-3 space-y-3">
+          {/* Signal reasons */}
+          {reasons.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-gray-700 font-semibold uppercase tracking-wider">Why</p>
+              {reasons.map((r, i) => (
+                <div key={i} className="flex items-start gap-2 text-xs text-gray-500">
+                  <span className="text-gray-700 mt-px shrink-0">·</span>
+                  <span>{r}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Market context */}
+          {(signal.rsi != null || signal.volume_ratio != null || signal.funding_rate != null) && (
+            <div className="flex items-center gap-3 text-xs text-gray-700 flex-wrap">
+              {signal.rsi != null && (
+                <span>RSI <span className={clsx(
+                  signal.rsi > 70 ? "text-red-500" : signal.rsi < 30 ? "text-emerald-500" : "text-gray-400"
+                )}>{signal.rsi.toFixed(0)}</span></span>
+              )}
+              {signal.volume_ratio != null && (
+                <span>Vol <span className={clsx(
+                  signal.volume_ratio > 2 ? "text-yellow-500" : "text-gray-400"
+                )}>{signal.volume_ratio.toFixed(1)}×</span></span>
+              )}
+              {signal.funding_rate != null && (
+                <span>Funding <span className={clsx(
+                  Math.abs(signal.funding_rate) > 0.05 ? "text-yellow-600" : "text-gray-400"
+                )}>{signal.funding_rate > 0 ? "+" : ""}{signal.funding_rate.toFixed(4)}%</span></span>
+              )}
+            </div>
+          )}
+
+          {/* Copy buttons */}
+          <div className="flex items-center gap-2.5 text-[11px] text-gray-700 flex-wrap">
+            <CopyBtn label="copy entry" value={String(signal.entry_price)} />
+            <span className="text-gray-800">·</span>
+            <CopyBtn label="copy TP1" value={String(signal.tp1)} />
+            {signal.tp2 > 0 && (
+              <>
+                <span className="text-gray-800">·</span>
+                <CopyBtn label="copy TP2" value={String(signal.tp2)} />
+              </>
+            )}
+            <span className="text-gray-800">·</span>
+            <CopyBtn label="copy SL" value={String(signal.sl)} />
+          </div>
+        </div>
+      )}
     </div>
   );
-}
+});

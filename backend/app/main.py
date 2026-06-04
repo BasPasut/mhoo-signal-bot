@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.settings import settings
 from app.models.db import create_db_and_tables
 from app.scheduler.runner import start_scheduler
+from app.scheduler.outcome_tracker import start_outcome_tracker
 from app.discord.bot import start_bot
 from app.api.routes import router
 
@@ -23,13 +24,14 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up...")
     create_db_and_tables()
     start_scheduler()
+    start_outcome_tracker()
     asyncio.create_task(start_bot())
     yield
     logger.info("Shutting down...")
 
 
 app = FastAPI(
-    title="Binance Signal Bot API",
+    title="Mhoo Signal Bot API",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -47,4 +49,4 @@ app.include_router(router, prefix="/api")
 
 @app.get("/")
 async def root():
-    return {"message": "Binance Signal Bot API", "docs": "/docs"}
+    return {"message": "Mhoo Signal Bot API", "docs": "/docs"}

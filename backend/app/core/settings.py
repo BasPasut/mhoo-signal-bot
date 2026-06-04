@@ -1,7 +1,7 @@
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from typing import List
-import os
+import os  # noqa
 
 
 class Settings(BaseSettings):
@@ -15,13 +15,18 @@ class Settings(BaseSettings):
     binance_api_key: str = ""
     binance_api_secret: str = ""
 
+    # Binance Testnet
+    binance_testnet_api_key: str = ""
+    binance_testnet_api_secret: str = ""
+    binance_testnet_base_url: str = "https://testnet.binancefuture.com"
+
     # Signal config
-    default_watchlist: str = "BTC,ETH,XRP"
+    default_watchlist: str = "BTC,ETH,BNB,SOL,XRP,ADA,AVAX,DOT,LINK,TON,TRX,DOGE,LTC,UNI,ATOM,NEAR,ARB,OP,SUI,INJ,APT,MATIC,WLD,FIL,FTM"
     default_risk_profile: str = "balanced"
     default_timeframes: str = "15m,1h"
     min_confidence_conservative: int = 80
-    min_confidence_balanced: int = 70
-    min_confidence_aggressive: int = 60
+    min_confidence_balanced: int = 68
+    min_confidence_aggressive: int = 50
     scan_interval_seconds: int = 300
 
     # News

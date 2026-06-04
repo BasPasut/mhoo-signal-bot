@@ -128,7 +128,12 @@ def analyze(df: pd.DataFrame) -> dict:
     trend = get_trend(df)
     signals, scores = [], []
 
-    # Candlesticks
+    # Volume confirmation: current candle volume vs 20-bar average
+    vol_avg = df["volume"].rolling(20).mean().iloc[-1]
+    vol_now = float(df["volume"].iloc[-1])
+    vol_confirmed = vol_now >= vol_avg * 0.9  # require at least 90% of average volume
+
+    # Candlesticks — only count if volume is present (filters noise wicks)
     checks = [
         (bullish_engulfing, "Bullish engulfing candle", "long", 0.8),
         (bearish_engulfing, "Bearish engulfing candle", "short", 0.8),
@@ -139,8 +144,13 @@ def analyze(df: pd.DataFrame) -> dict:
     ]
     for fn, label, direction, weight in checks:
         if fn(df):
-            signals.append({"label": label, "dir": direction, "w": weight})
-            scores.append(weight if direction == "long" else -weight)
+            if vol_confirmed:
+                signals.append({"label": label, "dir": direction, "w": weight})
+                scores.append(weight if direction == "long" else -weight)
+            else:
+                # Pattern present but low volume — half weight
+                signals.append({"label": f"{label} (low vol)", "dir": direction, "w": weight * 0.5})
+                scores.append((weight * 0.5) if direction == "long" else -(weight * 0.5))
 
     if doji(df) and trend != "sideways":
         signals.append({"label": "Doji — possible reversal", "dir": "neutral", "w": 0.4})
