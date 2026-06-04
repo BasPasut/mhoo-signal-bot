@@ -12,11 +12,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-MODEL_DIR = Path("./ml_models")
-MODEL_DIR.mkdir(exist_ok=True)
+MODEL_DIR = Path(os.environ.get("ML_MODELS_DIR", "./ml_models"))
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-HISTORY_DIR = Path("./ml_history")
-HISTORY_DIR.mkdir(exist_ok=True)
+HISTORY_DIR = Path(os.environ.get("ML_HISTORY_DIR", "./ml_history"))
+HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_HISTORY_ROWS = 5000
 RETRAIN_INTERVAL_SECS = 86400  # daily

@@ -47,3 +47,10 @@ frontend/public/
 
 # Watchdog
 watchdog.ps1
+
+# ML model binaries (rebuilt on first run in /data volume)
+backend/ml_models/
+backend/ml_history/
+
+# Fly.io local state
+.fly/

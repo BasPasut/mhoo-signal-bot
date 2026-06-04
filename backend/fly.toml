@@ -1,0 +1,61 @@
+# Fly.io configuration for Mhoo Signal Bot backend
+# Deploy: fly deploy --config fly.toml  (run from backend/ directory)
+
+app = "mhoo-signal-bot"
+primary_region = "sin"        # Singapore — closest to Binance Asia endpoints
+kill_signal = "SIGINT"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8000"
+  DATABASE_URL = "sqlite:////data/signalbot.db"
+  ML_MODELS_DIR = "/data/ml_models"
+  ML_HISTORY_DIR = "/data/ml_history"
+
+# Secrets (set via: fly secrets set KEY=value)
+# DISCORD_BOT_TOKEN
+# DISCORD_CHANNEL_ID
+# DISCORD_GUILD_ID
+# BINANCE_API_KEY
+# BINANCE_API_SECRET
+# CRYPTOPANIC_API_KEY
+# SECRET_KEY
+# CORS_ORIGINS  (set to your Vercel URL, e.g. https://mhoo-signal-bot.vercel.app)
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8000
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 50
+    soft_limit = 30
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "10s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/api/health"
+
+# Persistent volume — SQLite DB + ML models survive redeploys
+[[mounts]]
+  source = "mhoo_data"
+  destination = "/data"
+  initial_size = "1gb"
+
+# Free tier: shared-cpu-1x, 256MB RAM — enough for FastAPI + APScheduler + Discord bot
+[vm]
+  size = "shared-cpu-1x"
+  memory = "256mb"

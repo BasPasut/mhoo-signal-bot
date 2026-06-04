@@ -1,117 +1,178 @@
 # Deployment Guide
 
-## Overview
+## Stack
+- **Backend** → [Fly.io](https://fly.io) — free tier (shared-cpu-1x, 256MB RAM, persistent volume)
+- **Frontend** → [Vercel](https://vercel.com) — free tier (Next.js native)
 
-| Service | Platform | Cost |
+---
+
+## Prerequisites
+
+```bash
+# Install Fly CLI
+# Windows (PowerShell)
+iwr https://fly.io/install.ps1 -useb | iex
+
+# macOS / Linux
+curl -L https://fly.io/install.sh | sh
+
+# Install Vercel CLI (optional — can also deploy via GitHub integration)
+npm i -g vercel
+```
+
+---
+
+## Backend — Fly.io
+
+### 1. Login and create app
+
+```bash
+cd backend
+fly auth login
+fly launch --no-deploy --name mhoo-signal-bot --region sin
+# YES to using the existing fly.toml
+# NO to PostgreSQL
+# NO to Redis
+```
+
+### 2. Create the persistent volume
+
+```bash
+# 1 GB is plenty for SQLite + ML models + history CSVs
+fly volumes create mhoo_data --region sin --size 1
+```
+
+### 3. Set secrets
+
+```bash
+fly secrets set \
+  DISCORD_BOT_TOKEN="your_token" \
+  DISCORD_CHANNEL_ID="your_channel_id" \
+  DISCORD_GUILD_ID="your_guild_id" \
+  BINANCE_API_KEY="your_key" \
+  BINANCE_API_SECRET="your_secret" \
+  SECRET_KEY="change_me_use_random_hex" \
+  CORS_ORIGINS="https://mhoo-signal-bot.vercel.app" \
+  CRYPTOPANIC_API_KEY="optional"
+```
+
+> `DATABASE_URL`, `ML_MODELS_DIR`, `ML_HISTORY_DIR` are already set in `fly.toml`.
+
+### 4. Deploy
+
+```bash
+fly deploy
+```
+
+### 5. Verify
+
+```bash
+fly logs
+fly status
+curl https://mhoo-signal-bot.fly.dev/api/health
+```
+
+### Subsequent deploys
+
+```bash
+cd backend && fly deploy
+```
+
+### Useful commands
+
+```bash
+fly ssh console        # SSH into running machine
+fly volumes list       # Check volume status
+fly secrets list       # List secret keys (values hidden)
+fly logs -f            # Stream live logs
+```
+
+---
+
+## Frontend — Vercel
+
+### Option A: GitHub Integration (recommended)
+
+1. [vercel.com](https://vercel.com) → New Project → Import `BasPasut/mhoo-signal-bot`
+2. Set **Root Directory** = `frontend`
+3. Add environment variables:
+   - `NEXT_PUBLIC_API_URL` = `https://mhoo-signal-bot.fly.dev`
+   - `NEXT_PUBLIC_WS_URL` = `wss://mhoo-signal-bot.fly.dev`
+4. Deploy
+
+Every `git push main` auto-deploys the frontend.
+
+### Option B: CLI
+
+```bash
+cd frontend
+vercel --prod
+```
+
+### After first deploy
+
+Update backend CORS to allow your Vercel URL:
+
+```bash
+fly secrets set CORS_ORIGINS="https://mhoo-signal-bot.vercel.app"
+```
+
+---
+
+## Environment Variables Reference
+
+### Backend (Fly secrets)
+
+| Variable | Required | Description |
 |---|---|---|
-| Backend (FastAPI + engine + Discord) | Railway | Free ($5 credit/mo) |
-| Frontend (Next.js) | Vercel | Free |
-| Database | SQLite on Railway volume | Free (included) |
+| `DISCORD_BOT_TOKEN` | ✅ | Discord Developer Portal |
+| `DISCORD_CHANNEL_ID` | ✅ | Right-click channel → Copy ID |
+| `DISCORD_GUILD_ID` | ✅ | Right-click server → Copy ID |
+| `SECRET_KEY` | ✅ | Random hex string |
+| `CORS_ORIGINS` | ✅ | Your Vercel URL |
+| `BINANCE_API_KEY` | Optional | Only needed for order execution |
+| `BINANCE_API_SECRET` | Optional | Only needed for order execution |
+| `CRYPTOPANIC_API_KEY` | Optional | News sentiment scoring |
 
-No Redis. No MongoDB. No extra services.
+Set in `fly.toml` (no need to set as secrets):
 
----
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | `sqlite:////data/signalbot.db` |
+| `ML_MODELS_DIR` | `/data/ml_models` |
+| `ML_HISTORY_DIR` | `/data/ml_history` |
 
-## Step 1 — Discord Bot Setup
+### Frontend (Vercel env vars)
 
-1. Go to https://discord.com/developers/applications
-2. Click **New Application** → name it "Signal Bot"
-3. Go to **Bot** tab → click **Add Bot**
-4. Copy the **Bot Token** → save as `DISCORD_BOT_TOKEN`
-5. Enable **Message Content Intent** under Privileged Gateway Intents
-6. Go to **OAuth2 → URL Generator**
-   - Scopes: `bot`
-   - Permissions: `Send Messages`, `Embed Links`, `View Channels`
-7. Open the generated URL → invite the bot to your server
-8. In Discord, right-click your signal channel → **Copy Channel ID** → save as `DISCORD_CHANNEL_ID`
-
----
-
-## Step 2 — Railway (Backend)
-
-1. Go to https://railway.app → sign up with GitHub
-2. Click **New Project → Deploy from GitHub repo**
-3. Select `BasPasut/binance-signal-bot`
-4. Set **Root Directory** to `backend`
-5. Railway auto-detects the Dockerfile
-6. Go to **Variables** and add all values from `.env.example`:
-   - `DISCORD_BOT_TOKEN`
-   - `DISCORD_CHANNEL_ID`
-   - `DISCORD_GUILD_ID`
-   - `SECRET_KEY` (generate a random string)
-   - `CORS_ORIGINS` (add your Vercel URL after step 3)
-   - Optional: `CRYPTOPANIC_API_KEY`
-7. Add a **Volume** (for SQLite persistence):
-   - Mount path: `/app`
-8. Click **Deploy**
-9. Copy your Railway domain (e.g. `https://your-app.up.railway.app`)
+| Variable | Value |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | `https://mhoo-signal-bot.fly.dev` |
+| `NEXT_PUBLIC_WS_URL` | `wss://mhoo-signal-bot.fly.dev` |
 
 ---
 
-## Step 3 — Vercel (Frontend)
+## Free Tier Limits
 
-1. Go to https://vercel.com → sign up with GitHub
-2. Click **Add New → Project**
-3. Import `BasPasut/binance-signal-bot`
-4. Set **Root Directory** to `frontend`
-5. Add Environment Variables:
-   - `NEXT_PUBLIC_API_URL` = your Railway URL (e.g. `https://your-app.up.railway.app`)
-   - `NEXT_PUBLIC_WS_URL` = same but with `wss://` (e.g. `wss://your-app.up.railway.app`)
-6. Click **Deploy**
+### Fly.io (always-on, never sleeps)
+- 3 shared-cpu-1x VMs, 256MB RAM each (we use 1)
+- 3 GB persistent storage (we use 1 GB)
+- 160 GB outbound transfer/month
 
----
-
-## Step 4 — Update CORS
-
-Back in Railway → Variables → update `CORS_ORIGINS` to include your Vercel URL:
-```
-CORS_ORIGINS=https://your-app.vercel.app
-```
-
-Then redeploy.
-
----
-
-## Step 5 — GitHub Actions (auto-deploy on push)
-
-In your GitHub repo → Settings → Secrets → add:
-- `RAILWAY_TOKEN` — from Railway → Account Settings → Tokens
-- `VERCEL_TOKEN` — from Vercel → Account Settings → Tokens
-- `VERCEL_ORG_ID` — from Vercel project settings
-- `VERCEL_PROJECT_ID` — from Vercel project settings
-
-Now every push to `main` auto-deploys both services.
-
----
-
-## Keeping Railway Alive (optional)
-
-Railway free tier doesn't sleep, but if you're on a limited plan:
-
-Add a GitHub Action that pings your backend every 14 minutes:
-
-```yaml
-- cron: '*/14 * * * *'
-  run: curl https://your-app.up.railway.app/api/health
-```
+### Vercel (CDN, always-on)
+- 100 GB bandwidth/month
+- Unlimited deployments
 
 ---
 
 ## Local Development
 
 ```bash
-# Terminal 1: Backend
+# Backend
 cd backend
-pip install -r requirements.txt
-cp ../.env.example .env   # fill in Discord tokens
-uvicorn app.main:app --reload --port 8000
+cp ../.env.example .env
+./venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-# Terminal 2: Frontend
+# Frontend (separate terminal)
 cd frontend
-npm install
-echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
-echo "NEXT_PUBLIC_WS_URL=ws://localhost:8000" >> .env.local
-npm run dev
+npm run dev    # http://localhost:3000
 ```
-
-Open http://localhost:3000
