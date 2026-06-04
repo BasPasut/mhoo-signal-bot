@@ -32,4 +32,9 @@ export const api = {
     const qs = params?.signal_id ? `?signal_id=${params.signal_id}` : "";
     return request<any[]>(`/orders${qs}`);
   },
+  updateSignal: (id: number, body: { leverage?: number; tp1?: number; tp2?: number }) =>
+    request<{ ok: boolean; leverage: number; tp1: number; tp2: number; risk_reward: number }>(
+      `/signals/${id}`,
+      { method: "PATCH", body: JSON.stringify(body) }
+    ),
 };

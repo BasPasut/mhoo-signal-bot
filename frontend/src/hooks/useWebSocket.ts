@@ -32,6 +32,7 @@ export interface Signal {
   funding_rate?: number;
   fear_greed?: number;
   leverage?: number;
+  tier?: number;
   discord_sent: boolean;
   result?: string;
   result_at?: string;

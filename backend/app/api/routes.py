@@ -168,6 +168,37 @@ async def get_signal(signal_id: int, session: Session = Depends(get_session)):
     return _signal_to_dict(s)
 
 
+@router.patch("/signals/{signal_id}")
+async def update_signal(signal_id: int, body: dict, session: Session = Depends(get_session)):
+    s = session.get(Signal, signal_id)
+    if not s:
+        raise HTTPException(404, "Signal not found")
+    if s.result:
+        raise HTTPException(400, "Cannot update a resolved signal")
+    if "leverage" in body and body["leverage"] is not None:
+        lev = int(body["leverage"])
+        if lev < 1 or lev > 125:
+            raise HTTPException(400, "Leverage must be between 1 and 125")
+        s.leverage = lev
+    if "tp1" in body and body["tp1"] is not None:
+        tp1 = float(body["tp1"])
+        if tp1 <= 0:
+            raise HTTPException(400, "TP1 must be positive")
+        s.tp1 = tp1
+        sl_dist = abs(s.entry_price - s.sl)
+        tp_dist = abs(tp1 - s.entry_price)
+        s.risk_reward = round(tp_dist / sl_dist, 2) if sl_dist > 0 else s.risk_reward
+    if "tp2" in body and body["tp2"] is not None:
+        tp2 = float(body["tp2"])
+        if tp2 <= 0:
+            raise HTTPException(400, "TP2 must be positive")
+        s.tp2 = tp2
+    session.add(s)
+    session.commit()
+    session.refresh(s)
+    return {"ok": True, "leverage": s.leverage, "tp1": s.tp1, "tp2": s.tp2, "risk_reward": s.risk_reward}
+
+
 @router.get("/signals/stats/summary")
 async def signal_stats(session: Session = Depends(get_session)):
     signals = session.exec(select(Signal)).all()

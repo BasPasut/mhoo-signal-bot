@@ -199,7 +199,16 @@ export default function DashboardPage() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-1 lg:grid-cols-2">
           {filtered.map(s => (
-            <SignalCard key={s.id} signal={s} isNew={newIds.has(s.id)} livePrice={prices[s.symbol] ?? null} />
+            <SignalCard
+              key={s.id}
+              signal={s}
+              isNew={newIds.has(s.id)}
+              livePrice={prices[s.symbol] ?? null}
+              onUpdate={(updates) => {
+                setSignals(prev => prev.map(x => x.id === s.id ? { ...x, ...updates } : x));
+                signalsRef.current = signalsRef.current.map(x => x.id === s.id ? { ...x, ...updates } : x);
+              }}
+            />
           ))}
         </div>
       )}

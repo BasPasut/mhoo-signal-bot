@@ -1,5 +1,6 @@
 "use client";
 import { Signal } from "@/hooks/useWebSocket";
+import { api } from "@/lib/api";
 import clsx from "clsx";
 import { useState, memo } from "react";
 
@@ -133,10 +134,186 @@ function PnlBar({
   );
 }
 
+// ── Manual override panel ─────────────────────────────────────────────────────
+
+// Tier leverage caps: tier 1 → 20x, tier 2 → 10x, tier 3 → 5x, unknown → 20x
+function maxLev(tier?: number | null) {
+  if (tier === 1) return 20;
+  if (tier === 2) return 10;
+  if (tier === 3) return 5;
+  return 20;
+}
+
+function leveragePresets(tier?: number | null) {
+  const cap = maxLev(tier);
+  return [2, 5, 10, 15, 20].filter(v => v <= cap);
+}
+
+function ManualOverride({
+  signal,
+  onUpdate,
+}: {
+  signal: Signal;
+  onUpdate: (u: Partial<Signal>) => void;
+}) {
+  const [leverage, setLeverage]   = useState<number>(signal.leverage ?? 1);
+  const [tp1, setTp1]             = useState<string>(String(signal.tp1));
+  const [tp2, setTp2]             = useState<string>(signal.tp2 > 0 ? String(signal.tp2) : "");
+  const [saving, setSaving]       = useState(false);
+  const [saved, setSaved]         = useState(false);
+  const [error, setError]         = useState("");
+
+  const presets = leveragePresets(signal.tier);
+  const isLong  = signal.direction === "LONG";
+
+  // Live R/R preview from current TP1 input
+  const tp1Num  = parseFloat(tp1);
+  const slDist  = Math.abs(signal.entry_price - signal.sl);
+  const tpDist  = !isNaN(tp1Num) ? Math.abs(tp1Num - signal.entry_price) : 0;
+  const previewRR = slDist > 0 && tpDist > 0 ? (tpDist / slDist).toFixed(2) : null;
+  const previewTp1Gain = !isNaN(tp1Num) && signal.entry_price > 0
+    ? ((isLong ? tp1Num - signal.entry_price : signal.entry_price - tp1Num) / signal.entry_price * 100)
+    : null;
+
+  const hasChanges =
+    leverage !== (signal.leverage ?? 1) ||
+    parseFloat(tp1) !== signal.tp1 ||
+    (tp2 !== "" && parseFloat(tp2) !== signal.tp2);
+
+  async function handleSave() {
+    setError("");
+    const body: { leverage?: number; tp1?: number; tp2?: number } = {};
+    if (leverage !== (signal.leverage ?? 1)) body.leverage = leverage;
+    const tp1f = parseFloat(tp1);
+    const tp2f = parseFloat(tp2);
+    if (!isNaN(tp1f) && tp1f !== signal.tp1) body.tp1 = tp1f;
+    if (tp2 !== "" && !isNaN(tp2f) && tp2f !== signal.tp2) body.tp2 = tp2f;
+    if (Object.keys(body).length === 0) return;
+
+    setSaving(true);
+    try {
+      const res = await api.updateSignal(signal.id, body);
+      onUpdate({ leverage: res.leverage, tp1: res.tp1, tp2: res.tp2, risk_reward: res.risk_reward });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e: any) {
+      setError(e.message ?? "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] text-gray-700 font-semibold uppercase tracking-wider">Manual Override</p>
+
+      {/* ── Leverage ── */}
+      <div>
+        <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+          {presets.map(v => (
+            <button
+              key={v}
+              onClick={() => setLeverage(v)}
+              className={clsx(
+                "px-2 py-0.5 rounded text-xs font-mono font-semibold transition-colors",
+                leverage === v
+                  ? "bg-yellow-500/20 text-yellow-400 border border-yellow-600/50"
+                  : "bg-gray-800 text-gray-500 border border-gray-700 hover:text-gray-300 hover:border-gray-600"
+              )}
+            >
+              {v}×
+            </button>
+          ))}
+          {/* Custom input */}
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              min={1}
+              max={maxLev(signal.tier)}
+              value={leverage}
+              onChange={e => setLeverage(Math.min(maxLev(signal.tier), Math.max(1, parseInt(e.target.value) || 1)))}
+              className="w-14 bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-xs font-mono text-gray-300 text-center focus:outline-none focus:border-gray-500"
+            />
+            <span className="text-xs text-gray-700">×</span>
+          </div>
+        </div>
+        <p className="text-[10px] text-gray-700">
+          Max for this tier: {maxLev(signal.tier)}×
+          {leverage !== (signal.leverage ?? 1) && (
+            <span className="text-yellow-700 ml-1.5">
+              lev PnL preview: {previewTp1Gain !== null ? `TP1 ${previewTp1Gain >= 0 ? "+" : ""}${(previewTp1Gain * leverage).toFixed(1)}%` : "—"}
+            </span>
+          )}
+        </p>
+      </div>
+
+      {/* ── TP inputs ── */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-gray-600 w-8 shrink-0">TP1</span>
+          <input
+            type="number"
+            step="any"
+            value={tp1}
+            onChange={e => setTp1(e.target.value)}
+            className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:border-gray-500"
+            placeholder={String(signal.tp1)}
+          />
+          {previewTp1Gain !== null && (
+            <span className={clsx(
+              "text-[11px] tabular-nums shrink-0",
+              previewTp1Gain >= 0 ? "text-emerald-600" : "text-red-600"
+            )}>
+              {previewTp1Gain >= 0 ? "+" : ""}{previewTp1Gain.toFixed(2)}%
+              {previewRR && <span className="text-gray-700 ml-1">R{previewRR}</span>}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-gray-600 w-8 shrink-0">TP2</span>
+          <input
+            type="number"
+            step="any"
+            value={tp2}
+            onChange={e => setTp2(e.target.value)}
+            className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:border-gray-500"
+            placeholder={signal.tp2 > 0 ? String(signal.tp2) : "optional"}
+          />
+        </div>
+      </div>
+
+      {/* ── Save button ── */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleSave}
+          disabled={saving || !hasChanges}
+          className={clsx(
+            "px-3 py-1 rounded text-xs font-semibold transition-colors",
+            saved
+              ? "bg-emerald-900/50 text-emerald-400 border border-emerald-800"
+              : hasChanges
+                ? "bg-yellow-600/20 text-yellow-400 border border-yellow-700/50 hover:bg-yellow-600/30"
+                : "bg-gray-800 text-gray-700 border border-gray-800 cursor-default"
+          )}
+        >
+          {saving ? "Saving…" : saved ? "✓ Saved" : "Save changes"}
+        </button>
+        {error && <span className="text-[11px] text-red-500">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
+
 // ── Main card ─────────────────────────────────────────────────────────────────
 
 
-export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice }: { signal: Signal; isNew?: boolean; livePrice?: number | null }) {
+export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice, onUpdate }: {
+  signal: Signal;
+  isNew?: boolean;
+  livePrice?: number | null;
+  onUpdate?: (updates: Partial<Signal>) => void;
+}) {
   const isLong     = signal.direction === "LONG";
   const isOpen     = !signal.result;
   const isWin      = signal.result === "win";
@@ -401,6 +578,14 @@ export const SignalCard = memo(function SignalCard({ signal, isNew, livePrice }:
             <span className="text-gray-800">·</span>
             <CopyBtn label="copy SL" value={String(signal.sl)} />
           </div>
+
+          {/* Manual override — open signals only */}
+          {isOpen && onUpdate && (
+            <>
+              <div className="border-t border-gray-800/50 pt-3" />
+              <ManualOverride signal={signal} onUpdate={onUpdate} />
+            </>
+          )}
         </div>
       )}
     </div>
