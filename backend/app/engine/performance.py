@@ -123,7 +123,7 @@ def _actual_rr(sig) -> float:
     return sig.risk_reward or 1.5
 
 
-def equity_curve(starting_balance: float = 10_000.0) -> list[dict]:
+def equity_curve(starting_balance: float | None = None) -> list[dict]:
     """
     Compute a hypothetical paper-trading equity curve from all resolved signals.
 
@@ -135,6 +135,10 @@ def equity_curve(starting_balance: float = 10_000.0) -> list[dict]:
 
     Returns list of data points ordered by resolution time — ready to feed a chart.
     """
+    if starting_balance is None:
+        from app.core.config_store import get_starting_balance
+        starting_balance = get_starting_balance()
+
     try:
         from sqlmodel import Session, select
         from sqlalchemy import asc
@@ -190,8 +194,11 @@ def equity_curve(starting_balance: float = 10_000.0) -> list[dict]:
     return curve
 
 
-def portfolio_summary(starting_balance: float = 10_000.0) -> dict:
+def portfolio_summary(starting_balance: float | None = None) -> dict:
     """Aggregate metrics derived from the equity curve."""
+    if starting_balance is None:
+        from app.core.config_store import get_starting_balance
+        starting_balance = get_starting_balance()
     curve = equity_curve(starting_balance)
 
     empty = {

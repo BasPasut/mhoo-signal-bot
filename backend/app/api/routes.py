@@ -13,6 +13,7 @@ from app.core.config_store import (
     get_priority_bias, set_priority_bias,
     get_signal_tiers, set_signal_tiers,
     get_execution_mode, set_execution_mode,
+    get_starting_balance, set_starting_balance,
 )
 from app.core.settings import settings
 from app.scheduler.runner import run_now, update_interval, scheduler
@@ -258,6 +259,7 @@ async def get_config_endpoint():
             "testnet": bool(settings.binance_testnet_api_key),
             "live": bool(settings.binance_api_key),
         },
+        "starting_balance": get_starting_balance(),
     }
 
 
@@ -343,6 +345,15 @@ async def update_config(body: dict, background_tasks: BackgroundTasks):
         set_execution_mode(mode)
         if old != mode:
             changes.append({"field": "execution_mode", "old": old, "new": mode})
+
+    if "starting_balance" in body:
+        bal = float(body["starting_balance"])
+        if bal < 1:
+            raise HTTPException(400, "starting_balance must be >= 1 USDT")
+        old = get_starting_balance()
+        set_starting_balance(bal)
+        if old != bal:
+            changes.append({"field": "starting_balance", "old": old, "new": bal})
 
     if changes:
         background_tasks.add_task(send_config_change, changes)

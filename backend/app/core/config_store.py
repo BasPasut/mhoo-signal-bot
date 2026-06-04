@@ -100,3 +100,12 @@ def get_execution_mode() -> str:
 def set_execution_mode(mode: str):
     assert mode in _VALID_EXECUTION_MODES
     set_config("execution_mode", mode)
+
+
+def get_starting_balance() -> float:
+    return float(get_config("starting_balance", "10000"))
+
+
+def set_starting_balance(balance: float):
+    assert balance >= 1, "starting_balance must be >= 1"
+    set_config("starting_balance", str(balance))

@@ -18,6 +18,7 @@ export default function SettingsPage() {
   const [maxOpenPositions, setMaxOpenPositions] = useState(5);
   const [priorityBias, setPriorityBias] = useState<"Highest Confidence" | "Lowest Risk">("Highest Confidence");
   const [executionMode, setExecutionMode] = useState<"disabled" | "testnet" | "live">("disabled");
+  const [startingBalance, setStartingBalance] = useState<number>(10000);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -35,6 +36,7 @@ export default function SettingsPage() {
         setMaxOpenPositions(c.max_open_positions ?? 5);
         setPriorityBias(c.priority_bias ?? "Highest Confidence");
         setExecutionMode(c.execution_mode ?? "disabled");
+        setStartingBalance(c.starting_balance ?? 10000);
       })
       .catch((err) => {
         setLoadError(`Cannot connect to backend: ${err.message}`);
@@ -67,6 +69,7 @@ export default function SettingsPage() {
         max_open_positions: maxOpenPositions,
         priority_bias: priorityBias,
         execution_mode: executionMode,
+        starting_balance: startingBalance,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -308,6 +311,32 @@ export default function SettingsPage() {
             Real money will be used. Ensure your API key has Futures trading permission only, NOT withdrawal permission.
           </div>
         )}
+      </div>
+
+      {/* Starting balance */}
+      <div className="card space-y-3">
+        <div>
+          <h2 className="font-semibold text-white">Portfolio starting balance</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Your initial capital in USDT. Used by the Performance page to simulate real P&amp;L — equity curve, total return %, and drawdown are all calculated from this base.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-400">$</span>
+          <input
+            type="number"
+            min={1}
+            step={100}
+            value={startingBalance}
+            onChange={(e) => setStartingBalance(Math.max(1, Number(e.target.value)))}
+            className="input flex-1"
+            placeholder="10000"
+          />
+          <span className="text-sm text-gray-500">USDT</span>
+        </div>
+        <p className="text-xs text-gray-600">
+          Current: <span className="text-white font-medium">${startingBalance.toLocaleString()}</span> USDT
+        </p>
       </div>
 
       {/* Discord test */}
