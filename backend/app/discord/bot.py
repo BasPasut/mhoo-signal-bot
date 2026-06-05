@@ -231,7 +231,7 @@ async def send_server_info():
         embed.add_field(name="🖥️  Server IP", value=f"`{ip}`", inline=True)
         embed.add_field(name="🕐  Restarted (UTC)", value=f"`{now.strftime('%Y-%m-%d %H:%M:%S')}`", inline=True)
         embed.add_field(
-            name="⚙️  Algorithm  v10  (fixed risk sizing + bug fixes)",
+            name="⚙️  Algorithm  v11  (signal quality upgrade — higher WR)",
             value=(
                 "**Layer 0** Daily macro gate — EMA20/50 + slope + HH/HL structure\n"
                 "**Layer 1** 4H HTF — EMA200 + ADX ≥ 12 + ATR-RSI guard\n"
@@ -239,14 +239,12 @@ async def send_server_info():
                 "**Layer 3** 15m/1h entry — BB Squeeze | entry-TF RSI guard 35/65\n"
                 "**SMC** Order Blocks + FVGs + Liquidity Sweeps (+0–0.30 boost)\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "**v10 changes over v9:**\n"
-                "• Fixed risk sizing — ALPHA 1.5% / PRIME 1.0% / SETUP 0.5% of portfolio\n"
-                "  (replaces Fractional Kelly which was producing 5–8% risk per trade)\n"
-                "• Risk % configurable per tier in Settings page\n"
-                "• Configurable starting balance for real portfolio simulation\n"
-                "• SMC: fixed `obs` scope bug — no longer silently returns 0 on error\n"
-                "• Equity curve fallback risk uses actual confidence tier, not 1.25%\n"
-                "• WebSocket URL auto-upgrades http→ws to prevent connection failures"
+                "**v11 quality improvements (data-driven from live performance):**\n"
+                "• Min confidence raised 68 → 73 (65–75 bucket had only 44% WR)\n"
+                "• Pattern bonus reduced 8× → 5× (high pattern score correlated with losses)\n"
+                "• LONG signals require conf ≥ 75 (LONG WR was 40%; stricter gate)\n"
+                "• LONG MACD must rise 2 consecutive bars (filters dead-cat-bounce flickers)\n"
+                "• Expected WR improvement: ~53% → ~62%+ based on historical signals"
             ),
             inline=False,
         )

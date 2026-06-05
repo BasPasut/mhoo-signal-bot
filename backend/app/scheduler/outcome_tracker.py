@@ -211,6 +211,7 @@ async def _mark_tp1_hit(sig: Signal, tp1_candle_time: pd.Timestamp):
         tp1_hit_at=now.isoformat() + "Z",
     ))
     asyncio.create_task(_notify_discord_tp1(sig, be_sl))
+    asyncio.create_task(_move_binance_sl_to_breakeven(sig, be_sl))
 
 
 async def check_open_signals():
@@ -337,7 +338,43 @@ async def _resolve(sig: Signal, result: str, exit_price: Optional[float]):
         clear_symbol(sig.symbol, sig.timeframe)
         invalidate(sig.symbol, sig.timeframe)
 
+    # Cancel any lingering open orders (LIMIT entry if expired before fill)
+    asyncio.create_task(_cancel_binance_orders(sig.id, result))
+
+    # Close the position on Binance via MARKET order so the exchange position
+    # reflects the resolved outcome (works on testnet where conditional orders
+    # are not supported, and as a safety net on live Binance)
+    asyncio.create_task(_close_binance_position(sig.id, sig.symbol, sig.direction, result))
+
     asyncio.create_task(_notify_discord(sig, result, exit_price))
+
+
+async def _close_binance_position(signal_id: int, symbol: str, direction: str, result: str):
+    try:
+        from app.engine.execution import close_position_market
+        await close_position_market(signal_id, symbol, direction)
+    except Exception as e:
+        logger.warning(f"[resolution] close_position_market failed for signal {signal_id}: {e}")
+
+
+async def _cancel_binance_orders(signal_id: int, result: str):
+    try:
+        from app.engine.execution import cancel_signal_orders
+        await cancel_signal_orders(signal_id)
+    except Exception as e:
+        logger.warning(f"[resolution] cancel_signal_orders failed for signal {signal_id}: {e}")
+
+
+async def _move_binance_sl_to_breakeven(sig: Signal, breakeven_sl: float):
+    try:
+        from app.engine.execution import move_sl_to_breakeven
+        ok = await move_sl_to_breakeven(sig.id, sig.symbol, breakeven_sl, sig.direction)
+        if ok:
+            logger.info(f"[tp1] Binance SL moved to breakeven {breakeven_sl:.4f} for signal {sig.id}")
+        else:
+            logger.warning(f"[tp1] Binance SL move failed for signal {sig.id} — manual intervention needed")
+    except Exception as e:
+        logger.warning(f"[tp1] move_sl_to_breakeven exception for signal {sig.id}: {e}")
 
 
 async def _notify_discord(sig: Signal, result: str, price: Optional[float]):

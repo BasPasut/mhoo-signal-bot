@@ -1,12 +1,18 @@
 """
-Signal Scorer  v8-Ultimate
+Signal Scorer  v9
 Combines the 4 analysis layers into a final confidence score and signal.
 
 Weights:
   Technical indicators  75%  (3-layer MTF confluence)
-  Chart patterns        15%
+  Chart patterns        10%  (v9: reduced from 15% — high pattern scores correlated with losses)
   ML model               5%
   Market context         5%
+
+v9 Quality Improvements:
+  min_confidence_balanced raised 68 → 73 (65-75 bucket had only 44% WR)
+  pattern_bonus multiplier reduced 8 → 5 (pattern score inversely correlated with wins)
+  LONG direction threshold = max(min_conf, 75) — LONG WR was 40%; needs stricter gate
+  LONG MACD requires 2 consecutive rising bars (filters dead-cat-bounce flickers)
 
 v8 Risk Management:
   Tier 1 (BTC/ETH)  : max 20x, 10% position budget
@@ -347,7 +353,7 @@ async def score_symbol(symbol: str, timeframe: str, risk_profile: str = "balance
         ml_effective  = ml_score if (ml_score * ta_direction > 0) else 0.0
 
         ta_conf       = abs(ta_res["score"]) * 100
-        pattern_bonus = abs(pat_res["score"]) * 8 if pat_res["score"] * ta_direction > 0 else 0.0
+        pattern_bonus = abs(pat_res["score"]) * 5 if pat_res["score"] * ta_direction > 0 else 0.0
         ml_bonus      = abs(ml_effective) * 3
         context_adj   = context_score * ta_direction * 3
 
@@ -358,13 +364,14 @@ async def score_symbol(symbol: str, timeframe: str, risk_profile: str = "balance
         confidence = max(0.0, min(100.0, confidence + perf_adj))
 
         min_conf = settings.min_confidence(risk_profile)
+        direction_min = max(min_conf, 75) if ta_direction == 1 else min_conf
         perf_str = f"{perf_adj:+.1f}pts" if perf_adj != 0.0 else "no data"
         logger.info(
             f"Score {symbol}/{timeframe}: confidence={confidence:.1f}% "
             f"(mtf={ta_conf:.1f}% +pat={pattern_bonus:.1f} +ml={ml_bonus:.1f} ctx={context_adj:+.1f} "
-            f"perf={perf_str}) dir={'LONG' if ta_direction>0 else 'SHORT'} threshold={min_conf}%"
+            f"perf={perf_str}) dir={'LONG' if ta_direction>0 else 'SHORT'} threshold={direction_min}%"
         )
-        if confidence < min_conf:
+        if confidence < direction_min:
             return None
 
         direction = "LONG" if ta_direction == 1 else "SHORT"

@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     default_risk_profile: str = "balanced"
     default_timeframes: str = "15m,1h"
     min_confidence_conservative: int = 80
-    min_confidence_balanced: int = 68
+    min_confidence_balanced: int = 73
     min_confidence_aggressive: int = 50
     scan_interval_seconds: int = 300
 

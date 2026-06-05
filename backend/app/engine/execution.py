@@ -329,6 +329,13 @@ async def place_signal_orders(signal: dict, signal_id: int) -> None:
         tp2_r = _round_price(tp2_price, price_tick)
 
         # 9. Build order params list: (role, params_dict)
+        #
+        # Binance testnet (and some live configs) rejects STOP_MARKET / TAKE_PROFIT
+        # orders with -4120 ("use Algo Order API").  We therefore only place the
+        # LIMIT entry here; SL/TP are tracked internally and the position is closed
+        # programmatically via close_position_market() when outcome_tracker resolves
+        # the signal.  On live Binance where conditional orders work, the pattern can
+        # be extended; for now a single entry order is sufficient.
         orders_to_place = [
             ("entry", _signed_params({
                 "symbol": pair,
@@ -337,35 +344,6 @@ async def place_signal_orders(signal: dict, signal_id: int) -> None:
                 "timeInForce": "GTC",
                 "quantity": qty,
                 "price": entry_r,
-            }, api_secret)),
-            ("sl", _signed_params({
-                "symbol": pair,
-                "side": close_side,
-                "type": "STOP_MARKET",
-                "stopPrice": sl_r,
-                "closePosition": "false",
-                "reduceOnly": "true",
-                "quantity": qty,
-            }, api_secret)),
-            ("tp1", _signed_params({
-                "symbol": pair,
-                "side": close_side,
-                "type": "TAKE_PROFIT",
-                "timeInForce": "GTC",
-                "quantity": qty1,
-                "price": tp1_r,
-                "stopPrice": tp1_r,
-                "reduceOnly": "true",
-            }, api_secret)),
-            ("tp2", _signed_params({
-                "symbol": pair,
-                "side": close_side,
-                "type": "TAKE_PROFIT",
-                "timeInForce": "GTC",
-                "quantity": qty2,
-                "price": tp2_r,
-                "stopPrice": tp2_r,
-                "reduceOnly": "true",
             }, api_secret)),
         ]
 
@@ -410,6 +388,209 @@ async def place_signal_orders(signal: dict, signal_id: int) -> None:
         )
 
 
+# ── Breakeven SL move (called on TP1 hit) ────────────────────────────────────
+
+async def move_sl_to_breakeven(signal_id: int, symbol: str, breakeven_price: float, direction: str) -> bool:
+    """
+    When TP1 is hit, attempt to move the SL to breakeven on Binance.
+
+    Binance testnet (and some environments) do not support STOP_MARKET orders
+    via /fapi/v1/order (-4120).  In that case, the SL is tracked in the DB
+    only and close_position_market() will close the trade when outcome_tracker
+    resolves it.  This function logs the intent and returns True so the caller
+    treats it as a non-fatal soft success.
+
+    Returns True if the new SL was placed (or gracefully skipped).
+    """
+    from app.core.config_store import get_execution_mode
+    from app.engine.binance import _futures_pair
+    from app.models.db import TradeOrder, engine
+    from sqlmodel import Session, select
+
+    mode = get_execution_mode()
+    if mode == "disabled":
+        logger.info(f"[execution] move_sl_to_breakeven skipped — mode=disabled")
+        return False
+
+    if mode == "testnet":
+        api_key    = settings.binance_testnet_api_key
+        api_secret = settings.binance_testnet_api_secret
+        base_url   = settings.binance_testnet_base_url
+    else:
+        api_key    = settings.binance_api_key
+        api_secret = settings.binance_api_secret
+        base_url   = settings.binance_base_url
+
+    if not api_key or not api_secret:
+        logger.warning(f"[execution] move_sl_to_breakeven: keys not configured for mode={mode}")
+        return False
+
+    headers = {"X-MBX-APIKEY": api_key}
+    pair    = _futures_pair(symbol)
+
+    # 1. Fetch original SL order from DB
+    with Session(engine) as s:
+        sl_order = s.exec(
+            select(TradeOrder)
+            .where(TradeOrder.signal_id == signal_id)
+            .where(TradeOrder.role == "sl")
+        ).first()
+
+    if not sl_order:
+        logger.warning(f"[execution] move_sl_to_breakeven: no SL order found for signal {signal_id}")
+        return False
+
+    orig_order_id = sl_order.binance_order_id
+    qty           = sl_order.quantity
+    close_side    = "SELL" if direction == "LONG" else "BUY"
+
+    async with httpx.AsyncClient() as client:
+        # 2. Cancel original SL order
+        if orig_order_id:
+            try:
+                r = await client.delete(
+                    f"{base_url}/fapi/v1/order",
+                    params=_signed_params({"symbol": pair, "orderId": orig_order_id}, api_secret),
+                    headers=headers,
+                    timeout=8,
+                )
+                if r.status_code == 200 or (r.status_code == 400 and r.json().get("code") == -2011):
+                    logger.info(f"[execution] Cancelled original SL orderId={orig_order_id} for signal {signal_id}")
+                else:
+                    logger.warning(f"[execution] Cancel SL warning {r.status_code}: {r.text}")
+            except Exception as e:
+                logger.warning(f"[execution] Cancel SL exception: {e}")
+
+        # 3. Get price precision for correct rounding
+        prec       = await _get_symbol_precision(client, pair, base_url, headers)
+        be_price_r = _round_price(breakeven_price, prec["price_tick"])
+
+        # 4. Place new STOP_MARKET at breakeven
+        new_params = _signed_params({
+            "symbol":     pair,
+            "side":       close_side,
+            "type":       "STOP_MARKET",
+            "stopPrice":  be_price_r,
+            "closePosition": "false",
+            "reduceOnly": "true",
+            "quantity":   qty,
+        }, api_secret)
+
+        resp = await _place_single_order(client, base_url, pair, new_params, headers)
+        new_order_id = str(resp.get("orderId", "")) or None
+        status       = resp.get("status", "ERROR")
+        resp_code    = resp.get("code")
+        error        = resp.get("error") or (resp.get("msg") if status == "ERROR" else None)
+
+        # -4120: testnet/env does not support STOP_MARKET — log and treat as soft success
+        # outcome_tracker will close the position via close_position_market() instead
+        if resp_code == -4120:
+            logger.info(
+                f"[execution] Breakeven SL skipped (STOP_MARKET not supported) for signal {signal_id} "
+                f"{symbol} — position will be closed programmatically on resolution"
+            )
+            return True
+
+        logger.info(
+            f"[execution] Breakeven SL placed for signal {signal_id} {symbol} {direction}: "
+            f"stopPrice={be_price_r} qty={qty} orderId={new_order_id} status={status} error={error}"
+        )
+
+        # 5. Update trade_order row (only if we actually placed an order)
+        if new_order_id:
+            with Session(engine) as s:
+                row = s.exec(
+                    select(TradeOrder)
+                    .where(TradeOrder.signal_id == signal_id)
+                    .where(TradeOrder.role == "sl")
+                ).first()
+                if row:
+                    row.binance_order_id = new_order_id
+                    row.stop_price       = be_price_r
+                    row.status           = status
+                    row.error            = error
+                    s.add(row)
+                    s.commit()
+
+        return status not in ("ERROR",)
+
+
+# ── Cancel all orders for a signal (called on expiry / full resolution) ───────
+
+async def cancel_signal_orders(signal_id: int) -> None:
+    """
+    Cancel any still-open Binance orders linked to signal_id.
+
+    Called when a signal expires (entry never filled) or resolves, so no
+    orphaned LIMIT / STOP_MARKET orders linger on the exchange.
+    reduceOnly orders auto-cancel when position closes, but the LIMIT entry
+    and any unfilled TP/SL orders must be explicitly cancelled on expiry.
+    """
+    from app.core.config_store import get_execution_mode
+    from app.engine.binance import _futures_pair
+    from app.models.db import TradeOrder, engine
+    from sqlmodel import Session, select
+
+    mode = get_execution_mode()
+    if mode == "disabled":
+        return
+
+    if mode == "testnet":
+        api_key    = settings.binance_testnet_api_key
+        api_secret = settings.binance_testnet_api_secret
+        base_url   = settings.binance_testnet_base_url
+    else:
+        api_key    = settings.binance_api_key
+        api_secret = settings.binance_api_secret
+        base_url   = settings.binance_base_url
+
+    if not api_key or not api_secret:
+        return
+
+    headers = {"X-MBX-APIKEY": api_key}
+
+    with Session(engine) as s:
+        orders = s.exec(
+            select(TradeOrder).where(TradeOrder.signal_id == signal_id)
+        ).all()
+
+    if not orders:
+        return
+
+    async with httpx.AsyncClient() as client:
+        for order in orders:
+            if not order.binance_order_id:
+                continue
+            try:
+                r = await client.delete(
+                    f"{base_url}/fapi/v1/order",
+                    params=_signed_params({
+                        "symbol": order.binance_symbol,
+                        "orderId": order.binance_order_id,
+                    }, api_secret),
+                    headers=headers,
+                    timeout=8,
+                )
+                code = r.json().get("code") if r.status_code != 200 else None
+                if r.status_code == 200:
+                    logger.info(
+                        f"[execution] Cancelled {order.role} orderId={order.binance_order_id} "
+                        f"for signal {signal_id}"
+                    )
+                elif code == -2011:
+                    pass  # already filled or cancelled — fine
+                else:
+                    logger.warning(
+                        f"[execution] Cancel {order.role} orderId={order.binance_order_id} "
+                        f"returned {r.status_code}: {r.text}"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"[execution] Cancel order exception signal={signal_id} "
+                    f"role={order.role}: {e}"
+                )
+
+
 # ── Live equity fetch ─────────────────────────────────────────────────────────
 
 async def get_futures_balance(
@@ -433,6 +614,94 @@ async def get_futures_balance(
     except Exception as e:
         logger.warning(f"get_futures_balance failed: {e}")
     return 0.0
+
+
+# ── Close position via MARKET order (called by outcome_tracker on resolution) ─
+
+async def close_position_market(signal_id: int, symbol: str, direction: str) -> bool:
+    """
+    Place a MARKET reduceOnly order to close the full open position for signal_id.
+    Called by outcome_tracker._resolve() for every resolved signal outcome so that
+    the Binance position is actually closed when klines detect SL/TP/expiry.
+
+    Returns True if the close order was accepted, False on error.
+    """
+    from app.core.config_store import get_execution_mode
+    from app.engine.binance import _futures_pair
+    from app.models.db import TradeOrder, engine
+    from sqlmodel import Session, select
+
+    mode = get_execution_mode()
+    if mode == "disabled":
+        return False
+
+    if mode == "testnet":
+        api_key    = settings.binance_testnet_api_key
+        api_secret = settings.binance_testnet_api_secret
+        base_url   = settings.binance_testnet_base_url
+    else:
+        api_key    = settings.binance_api_key
+        api_secret = settings.binance_api_secret
+        base_url   = settings.binance_base_url
+
+    if not api_key or not api_secret:
+        return False
+
+    headers = {"X-MBX-APIKEY": api_key}
+    pair       = _futures_pair(symbol)
+    close_side = "SELL" if direction == "LONG" else "BUY"
+
+    # Fetch the filled quantity from the entry order in DB
+    qty: Optional[float] = None
+    with Session(engine) as s:
+        entry_order = s.exec(
+            select(TradeOrder)
+            .where(TradeOrder.signal_id == signal_id)
+            .where(TradeOrder.role == "entry")
+        ).first()
+        if entry_order:
+            qty = entry_order.quantity
+
+    if not qty:
+        logger.warning(f"[execution] close_position_market: no entry order qty for signal {signal_id}")
+        return False
+
+    async with httpx.AsyncClient() as client:
+        prec  = await _get_symbol_precision(client, pair, base_url, headers)
+        qty_r = _round_step(qty, prec["qty_step"])
+
+        params = _signed_params({
+            "symbol":     pair,
+            "side":       close_side,
+            "type":       "MARKET",
+            "quantity":   qty_r,
+            "reduceOnly": "true",
+        }, api_secret)
+
+        r = await client.post(
+            f"{base_url}/fapi/v1/order",
+            data=params,
+            headers=headers,
+            timeout=10,
+        )
+
+        if r.status_code == 200:
+            logger.info(
+                f"[execution] Position closed MARKET for signal {signal_id} "
+                f"{symbol} {direction} qty={qty_r} orderId={r.json().get('orderId')}"
+            )
+            return True
+        else:
+            # -2022 = reduceOnly order would increase position (no position open — fine)
+            code = r.json().get("code")
+            if code == -2022:
+                logger.info(f"[execution] close_position_market: no open position for signal {signal_id} — skipping")
+                return True
+            logger.warning(
+                f"[execution] close_position_market failed for signal {signal_id}: "
+                f"{r.status_code} {r.text}"
+            )
+            return False
 
 
 # ── Equity-check decorator ────────────────────────────────────────────────────

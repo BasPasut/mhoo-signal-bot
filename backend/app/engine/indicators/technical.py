@@ -267,8 +267,11 @@ def _htf_filter(df_4h: pd.DataFrame) -> tuple[int, str]:
 
 def _ctf_confirm(df_1h: pd.DataFrame, htf_direction: int) -> tuple[bool, str]:
     """
-    Bullish confirmation: 1H MACD histogram is green AND increasing.
-    Bearish confirmation: 1H MACD histogram is red AND decreasing.
+    Bullish confirmation: 1H MACD histogram is green AND rising for 2 consecutive bars.
+    Bearish confirmation: 1H MACD histogram is red AND falling (single bar sufficient).
+
+    LONG requires 2-bar consecutive rise to filter dead-cat-bounce MACD flickers.
+    SHORT keeps single-bar check — SHORT WR is already strong.
     """
     if df_1h is None or len(df_1h) < 50:
         return False, "1H data missing or insufficient"
@@ -278,15 +281,16 @@ def _ctf_confirm(df_1h: pd.DataFrame, htf_direction: int) -> tuple[bool, str]:
     hist   = macd.macd_diff()
     h_now  = float(hist.iloc[-1])
     h_prev = float(hist.iloc[-2])
+    h_prev2 = float(hist.iloc[-3])
 
     rsi = float(ta.momentum.RSIIndicator(close, 14).rsi().iloc[-1])
 
     if htf_direction == 1:
-        if h_now > 0 and h_now > h_prev:
+        if h_now > 0 and h_now > h_prev and h_prev > h_prev2:
             if rsi > 65:
                 return False, f"1H MACD bullish but RSI overbought ({rsi:.0f}) — skip"
-            return True, f"1H MACD bullish ({h_now:.4f} rising) | RSI {rsi:.0f}"
-        return False, f"1H MACD not bullish (hist={h_now:.4f}, prev={h_prev:.4f})"
+            return True, f"1H MACD bullish 2-bar rising ({h_prev2:.4f}→{h_prev:.4f}→{h_now:.4f}) | RSI {rsi:.0f}"
+        return False, f"1H MACD not bullish or single-bar flicker (hist={h_now:.4f}, prev={h_prev:.4f}, prev2={h_prev2:.4f})"
     else:
         if h_now < 0 and h_now < h_prev:
             if rsi < 35:
