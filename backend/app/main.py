@@ -4,11 +4,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from app.core.settings import settings
 from app.models.db import create_db_and_tables
 from app.scheduler.runner import start_scheduler
 from app.scheduler.outcome_tracker import start_outcome_tracker
+from app.scheduler.weekly_audit import run_weekly_audit
 from app.discord.bot import start_bot
 from app.api.routes import router
 
@@ -19,6 +22,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+_audit_scheduler = AsyncIOScheduler()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up...")
@@ -26,6 +32,18 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     start_outcome_tracker()
     asyncio.create_task(start_bot())
+
+    _audit_scheduler.add_job(
+        run_weekly_audit,
+        trigger=CronTrigger(day_of_week="mon", hour=0, minute=5, timezone="UTC"),
+        id="weekly_audit",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    _audit_scheduler.start()
+    logger.info("Weekly audit scheduler started — fires Monday 00:05 UTC")
+
     yield
     logger.info("Shutting down...")
 

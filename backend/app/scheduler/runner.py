@@ -11,6 +11,7 @@ from app.engine.feature_store import save_features
 from app.core.config_store import (
     get_watchlist, get_risk_profile, get_scan_interval,
     get_max_open_positions, get_priority_bias, get_signal_tiers,
+    get_excluded_symbols,
 )
 from app.engine.signal_queue import prioritize_signals
 from app.core.ws import manager
@@ -62,6 +63,11 @@ async def _run_scan():
 
 async def _run_scan_inner():
     watchlist = get_watchlist()
+    excluded = set(get_excluded_symbols())
+    if excluded:
+        before = len(watchlist)
+        watchlist = [s for s in watchlist if s not in excluded]
+        logger.info(f"Exclusion filter: removed {before - len(watchlist)} symbols ({', '.join(excluded)})")
     risk_profile = get_risk_profile()
     max_open = get_max_open_positions()
     priority_bias = get_priority_bias()
@@ -221,6 +227,12 @@ async def _run_scan_inner():
             logger.error(f"Error persisting {symbol}: {e}", exc_info=True)
 
     await manager.broadcast_status("Scan complete")
+
+    try:
+        from app.scheduler.weekly_audit import run_wr_watchdog
+        await run_wr_watchdog()
+    except Exception as e:
+        logger.warning(f"[watchdog] Failed: {e}")
 
 
 def start_scheduler():

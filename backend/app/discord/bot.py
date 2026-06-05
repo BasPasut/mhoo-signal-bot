@@ -430,6 +430,124 @@ async def send_tp1_notification(sig, breakeven_sl: float):
         logger.error(f"send_tp1_notification failed: {e}")
 
 
+async def send_weekly_report(
+    *,
+    signals_7d: int,
+    wr_7d: float | None,
+    wins_7d: int,
+    losses_7d: int,
+    signals_30d: int,
+    wr_30d: float | None,
+    summary: dict,
+    sym_breakdown: list[dict],
+    conf_breakdown: list[dict],
+    dir_breakdown: dict,
+    newly_excluded: list[str],
+    newly_cleared: list[str],
+    all_excluded: list[str],
+):
+    """Weekly performance audit report to the general channel."""
+    _GENERAL_CHANNEL_ID = 1502594092750606418
+    global _client
+    if not settings.discord_bot_token:
+        return
+    try:
+        if _client is None or _client.is_closed():
+            await _ensure_client()
+        channel = _client.get_channel(_GENERAL_CHANNEL_ID)
+        if channel is None:
+            channel = await _client.fetch_channel(_GENERAL_CHANNEL_ID)
+
+        wr_str = f"{wr_7d * 100:.1f}%" if wr_7d is not None else "n/a"
+        wr30_str = f"{wr_30d * 100:.1f}%" if wr_30d is not None else "n/a"
+        color = 0x1D9E75 if (wr_7d or 0) >= 0.55 else 0xD85A30
+
+        embed = discord.Embed(
+            title="📊 Weekly Performance Audit",
+            color=color,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.add_field(
+            name="7-Day Summary",
+            value=(
+                f"Signals: `{signals_7d}` resolved  |  Wins: `{wins_7d}`  Losses: `{losses_7d}`\n"
+                f"Win Rate: **`{wr_str}`**  |  30d WR: `{wr30_str}`"
+            ),
+            inline=False,
+        )
+
+        if sym_breakdown:
+            top5 = sym_breakdown[:5]
+            rows = [f"`{r['symbol']:<8}` {r['wins']}W/{r['losses']}L  WR {r['wr']*100:.0f}%" if r['wr'] is not None else f"`{r['symbol']:<8}` {r['wins']}W/{r['losses']}L" for r in top5]
+            embed.add_field(name="Top Symbols (7d)", value="\n".join(rows), inline=False)
+
+        if conf_breakdown:
+            rows = [f"Conf `{r['label']}` → {r['wins']}W/{r['losses']}L  WR `{r['wr']*100:.0f}%`" for r in conf_breakdown]
+            embed.add_field(name="By Confidence Bucket", value="\n".join(rows), inline=False)
+
+        lwr = dir_breakdown.get("long_wr")
+        swr = dir_breakdown.get("short_wr")
+        lwr_str = f"{lwr*100:.0f}%" if lwr is not None else "n/a"
+        swr_str = f"{swr*100:.0f}%" if swr is not None else "n/a"
+        embed.add_field(
+            name="By Direction",
+            value=(
+                f"LONG  {dir_breakdown['long_n']} trades  WR `{lwr_str}`\n"
+                f"SHORT {dir_breakdown['short_n']} trades  WR `{swr_str}`"
+            ),
+            inline=False,
+        )
+
+        if newly_excluded or newly_cleared:
+            lines = []
+            if newly_excluded:
+                lines.append(f"Auto-excluded: {', '.join(newly_excluded)}")
+            if newly_cleared:
+                lines.append(f"Reinstated: {', '.join(newly_cleared)}")
+            embed.add_field(name="Symbol Changes", value="\n".join(lines), inline=False)
+
+        if all_excluded:
+            embed.add_field(name="Currently Excluded", value=", ".join(all_excluded), inline=False)
+
+        embed.set_footer(text="Mhoo Signal Bot · weekly audit")
+        await channel.send(embed=embed)
+        logger.info("Weekly report sent to Discord")
+    except Exception as e:
+        logger.error(f"send_weekly_report failed: {e}")
+
+
+async def send_watchdog_alert(*, wr: float, wins: int, losses: int, n: int):
+    """WR watchdog alert — fired when rolling 7-day WR drops below threshold."""
+    _GENERAL_CHANNEL_ID = 1502594092750606418
+    global _client
+    if not settings.discord_bot_token:
+        return
+    try:
+        if _client is None or _client.is_closed():
+            await _ensure_client()
+        channel = _client.get_channel(_GENERAL_CHANNEL_ID)
+        if channel is None:
+            channel = await _client.fetch_channel(_GENERAL_CHANNEL_ID)
+
+        embed = discord.Embed(
+            title="⚠️ Win-Rate Alert — 7-day WR Below Threshold",
+            color=0xD85A30,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.add_field(name="7-Day WR", value=f"`{wr*100:.1f}%`", inline=True)
+        embed.add_field(name="Trades", value=f"`{wins}W / {losses}L` ({n} total)", inline=True)
+        embed.add_field(
+            name="Action",
+            value="Consider reviewing recent signals for pattern drift or market regime change.",
+            inline=False,
+        )
+        embed.set_footer(text="Mhoo Signal Bot · watchdog alert")
+        await channel.send(embed=embed)
+        logger.info(f"Watchdog alert sent: WR={wr*100:.1f}% ({wins}W/{losses}L)")
+    except Exception as e:
+        logger.error(f"send_watchdog_alert failed: {e}")
+
+
 async def start_bot():
     """Call once at app startup — starts the Discord client and announces the server IP."""
     if not settings.discord_bot_token:

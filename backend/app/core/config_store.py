@@ -135,3 +135,12 @@ def set_risk_per_tier(tiers: dict[str, float]):
         assert 0.1 <= tiers[k] <= 10.0, f"{k} risk must be 0.1–10%"
     raw = ",".join(f"{k}:{tiers[k]}" for k in ("ALPHA", "PRIME", "SETUP"))
     set_config("risk_per_tier", raw)
+
+
+def get_excluded_symbols() -> list[str]:
+    raw = get_config("excluded_symbols", "")
+    return [s.strip().upper() for s in raw.split(",") if s.strip()]
+
+
+def set_excluded_symbols(symbols: list[str]):
+    set_config("excluded_symbols", ",".join(s.upper() for s in symbols))
