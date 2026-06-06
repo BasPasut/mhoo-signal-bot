@@ -292,6 +292,19 @@ async def place_signal_orders(signal: dict, signal_id: int) -> None:
             leverage=leverage,
         )
         raw_qty = sizing["contracts"]
+
+        # 3a. Notional cap — a single position must not exceed 30% of account as notional.
+        # This prevents over-concentration when leverage is low or SL is very tight.
+        MAX_NOTIONAL_PCT = 0.30
+        max_notional = balance * MAX_NOTIONAL_PCT
+        if sizing["notional_value"] > max_notional:
+            raw_qty = max_notional / entry_price
+            logger.info(
+                f"[execution] Notional cap applied for {pair}: "
+                f"${sizing['notional_value']:.0f} → ${max_notional:.0f} "
+                f"({MAX_NOTIONAL_PCT*100:.0f}% of ${balance:.0f})"
+            )
+
         qty = _round_step(raw_qty, qty_step)
 
         # 4. Validate size

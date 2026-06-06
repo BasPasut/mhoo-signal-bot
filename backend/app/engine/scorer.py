@@ -59,9 +59,9 @@ _TIER2 = frozenset({
 # Everything else (meme coins, micro-caps) → Tier 3
 
 _TIER_CONFIG: dict[int, dict] = {
-    1: {"max_lev": 20, "equity_risk": 0.10},    # 10% position budget → ~6-20x typical
-    2: {"max_lev": 10, "equity_risk": 0.10},    # 10% position budget → ~5-10x typical
-    3: {"max_lev":  5, "equity_risk": 0.075},   #  7.5% position budget → ~2-5x typical
+    1: {"max_lev": 20, "equity_risk": 0.30},    # BTC/ETH   → ~10-15x typical (3% SL → 10x)
+    2: {"max_lev": 10, "equity_risk": 0.25},    # major alts → ~7-10x typical (3% SL → 8x)
+    3: {"max_lev":  5, "equity_risk": 0.15},    # micro-caps → ~3-5x typical  (3% SL → 5x)
 }
 
 
