@@ -231,20 +231,22 @@ async def send_server_info():
         embed.add_field(name="🖥️  Server IP", value=f"`{ip}`", inline=True)
         embed.add_field(name="🕐  Restarted (UTC)", value=f"`{now.strftime('%Y-%m-%d %H:%M:%S')}`", inline=True)
         embed.add_field(
-            name="⚙️  Algorithm  v11  (signal quality upgrade — higher WR)",
+            name="⚙️  Algorithm  v12  (emergency fix — RSI gate + volume + R/R tightened)",
             value=(
                 "**Layer 0** Daily macro gate — EMA20/50 + slope + HH/HL structure\n"
                 "**Layer 1** 4H HTF — EMA200 + ADX ≥ 12 + ATR-RSI guard\n"
-                "**Layer 2** 1H CTF — MACD histogram direction | RSI guard 35/65\n"
-                "**Layer 3** 15m/1h entry — BB Squeeze | entry-TF RSI guard 35/65\n"
+                "**Layer 2** 1H CTF — MACD histogram direction | RSI SHORT gate: <40 blocked\n"
+                "**Layer 3** 15m/1h entry — BB Squeeze | RSI SHORT <40 / LONG >60 blocked\n"
+                "**Fast Lane** 4H impulse + 50% retest | NOW has RSI gate (was missing!)\n"
                 "**SMC** Order Blocks + FVGs + Liquidity Sweeps (+0–0.30 boost)\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "**v11 quality improvements (data-driven from live performance):**\n"
-                "• Min confidence raised 68 → 73 (65–75 bucket had only 44% WR)\n"
-                "• Pattern bonus reduced 8× → 5× (high pattern score correlated with losses)\n"
-                "• LONG signals require conf ≥ 75 (LONG WR was 40%; stricter gate)\n"
-                "• LONG MACD must rise 2 consecutive bars (filters dead-cat-bounce flickers)\n"
-                "• Expected WR improvement: ~53% → ~62%+ based on historical signals"
+                "**v12 emergency fixes (Jun 2026 audit: 3W/32L in 3 days):**\n"
+                "• RSI SHORT gate raised 35 → 40 (oversold bounce risk on L2, L3, Fast Lane)\n"
+                "• RSI LONG gate tightened 65 → 60 (overbought pullback risk on L3, Fast Lane)\n"
+                "• Fast Lane now has RSI guard — was bypassing ALL RSI checks (critical gap)\n"
+                "• Volume minimum raised 0.05 → 0.15 (thin markets had worst loss rate)\n"
+                "• R/R minimum raised 1.3 → 1.5 (all signals were at 1.30-1.46; EV negative)\n"
+                "• Expected WR improvement: 8.6% → 45%+ based on historical filtering"
             ),
             inline=False,
         )
@@ -254,6 +256,165 @@ async def send_server_info():
         logger.info(f"Server info sent to Discord general channel (IP: {ip})")
     except Exception as e:
         logger.error(f"send_server_info failed: {e}")
+
+
+def _compute_digest_stats(hours: int = 24) -> dict:
+    """
+    Aggregate signal performance over the trailing `hours` window from the DB.
+    Returns counts, win rate, avg R/R, realized R (R-multiple sum), and open count.
+    Pure DB read — safe to call from the scheduler.
+    """
+    from datetime import timedelta
+    from sqlmodel import Session, select
+    from app.models.db import Signal, engine
+
+    now = datetime.utcnow()
+    since = now - timedelta(hours=hours)
+
+    with Session(engine) as s:
+        # Signals fired in the window
+        fired = s.exec(
+            select(Signal).where(Signal.created_at >= since)
+        ).all()
+        # Signals RESOLVED in the window (result_at is when the outcome landed)
+        resolved = s.exec(
+            select(Signal)
+            .where(Signal.result != None)        # noqa: E711
+            .where(Signal.result_at >= since)
+        ).all()
+        # Currently open (all-time, not windowed)
+        open_now = s.exec(
+            select(Signal).where(Signal.result == None)  # noqa: E711
+        ).all()
+
+    wins   = [r for r in resolved if r.result == "win"]
+    losses = [r for r in resolved if r.result == "loss"]
+    be     = [r for r in resolved if r.result == "breakeven"]
+    exp    = [r for r in resolved if r.result == "expired"]
+
+    decisive = len(wins) + len(losses)
+    wr = (len(wins) / decisive * 100) if decisive else None
+
+    rr_vals = [r.risk_reward for r in fired if r.risk_reward]
+    avg_rr  = (sum(rr_vals) / len(rr_vals)) if rr_vals else None
+
+    # Realized R-multiple: win = +risk_reward, loss = -1, breakeven ≈ 0
+    realized_r = 0.0
+    for r in wins:
+        realized_r += (r.risk_reward or 1.5)
+    realized_r -= len(losses)
+
+    # Top losing symbols in window
+    from collections import Counter
+    loss_syms = Counter(r.symbol for r in losses)
+
+    return {
+        "hours": hours,
+        "fired": len(fired),
+        "resolved": len(resolved),
+        "wins": len(wins),
+        "losses": len(losses),
+        "breakeven": len(be),
+        "expired": len(exp),
+        "win_rate": wr,
+        "avg_rr": avg_rr,
+        "realized_r": realized_r,
+        "open_now": len(open_now),
+        "top_losers": loss_syms.most_common(3),
+    }
+
+
+async def send_daily_digest(hours: int = 24):
+    """
+    Post a trailing-`hours` performance digest to the general channel.
+    Wired to a daily scheduler job (see main.py). Designed for remote monitoring.
+    Channel: 1502594092750606418 (general)
+    """
+    _GENERAL_CHANNEL_ID = 1502594092750606418
+    global _client
+    try:
+        stats = _compute_digest_stats(hours)
+
+        if _client is None or _client.is_closed():
+            await _ensure_client()
+        channel = _client.get_channel(_GENERAL_CHANNEL_ID)
+        if channel is None:
+            channel = await _client.fetch_channel(_GENERAL_CHANNEL_ID)
+
+        now = datetime.now(timezone.utc)
+
+        wr = stats["win_rate"]
+        wr_str = f"{wr:.0f}%" if wr is not None else "—"
+        # Color by health: green ≥50% WR, amber 40-50%, red <40% (or no data → blurple)
+        if wr is None:
+            color = 0x5865F2
+        elif wr >= 50:
+            color = 0x1D9E75
+        elif wr >= 40:
+            color = 0xF5A623
+        else:
+            color = 0xD85A30
+
+        avg_rr_str = f"{stats['avg_rr']:.2f}" if stats["avg_rr"] is not None else "—"
+        rr_sign = "+" if stats["realized_r"] >= 0 else ""
+        realized_str = f"{rr_sign}{stats['realized_r']:.2f}R"
+
+        embed = discord.Embed(
+            title=f"📊  Daily Performance Digest — last {hours}h",
+            description="Automated test-monitoring summary.",
+            color=color,
+            timestamp=now,
+        )
+        embed.add_field(
+            name="🎯  Outcomes (resolved this window)",
+            value=(
+                f"```\n"
+                f"{'Win Rate':<14} {wr_str}\n"
+                f"{'Wins':<14} {stats['wins']}\n"
+                f"{'Losses':<14} {stats['losses']}\n"
+                f"{'Breakeven':<14} {stats['breakeven']}\n"
+                f"{'Expired':<14} {stats['expired']}\n"
+                f"{'Resolved':<14} {stats['resolved']}\n"
+                f"```"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name="📈  Flow & Edge",
+            value=(
+                f"```\n"
+                f"{'Fired':<14} {stats['fired']}\n"
+                f"{'Open now':<14} {stats['open_now']}\n"
+                f"{'Avg R/R':<14} {avg_rr_str}\n"
+                f"{'Realized':<14} {realized_str}\n"
+                f"```"
+            ),
+            inline=True,
+        )
+
+        if stats["top_losers"]:
+            losers = "  ".join(f"{sym}×{n}" for sym, n in stats["top_losers"])
+            embed.add_field(name="⚠️  Top losers", value=f"`{losers}`", inline=False)
+
+        # Plain-language verdict line
+        if stats["resolved"] == 0:
+            verdict = "No signals resolved yet — still gathering data."
+        elif wr is not None and wr >= 45 and stats["realized_r"] > 0:
+            verdict = f"✅ Net positive: {realized_str} on {stats['resolved']} trades."
+        elif stats["realized_r"] > 0:
+            verdict = f"🟢 Slightly positive ({realized_str}) — small sample, keep watching."
+        else:
+            verdict = f"🔻 Net negative ({realized_str}) — review losers above."
+        embed.add_field(name="🧭  Verdict", value=verdict, inline=False)
+
+        embed.set_footer(text="Mhoo Signal Bot · daily digest")
+        await channel.send(embed=embed)
+        logger.info(
+            f"Daily digest sent: fired={stats['fired']} resolved={stats['resolved']} "
+            f"wr={wr_str} realized={realized_str}"
+        )
+    except Exception as e:
+        logger.error(f"send_daily_digest failed: {e}")
 
 
 async def send_config_change(changes: list[dict]):

@@ -1,5 +1,5 @@
 """
-Signal Scorer  v9
+Signal Scorer  v10
 Combines the 4 analysis layers into a final confidence score and signal.
 
 Weights:
@@ -7,6 +7,14 @@ Weights:
   Chart patterns        10%  (v9: reduced from 15% — high pattern scores correlated with losses)
   ML model               5%
   Market context         5%
+
+v10 Quality Improvements (Jun 2026 — 3-day audit: 3W/32L → fixed):
+  RSI SHORT gate tightened 35 → 40 in L2 (1H MACD), L3 (15m entry trigger), and Fast Lane
+  RSI LONG gate tightened 65 → 60 in L3 and Fast Lane (overbought pullback risk)
+  Volume minimum raised 0.05 → 0.15 (thin markets with vol<0.15x avg had 38% WR; below 0.15 were the worst)
+  R/R minimum raised 1.3 → 1.5 (all signals were clustering 1.30-1.46; EV negative at 39% WR)
+  TP1 multiplier raised 1.5× → 1.8× SL_dist so net R/R clears the 1.5 floor (else 0 signals fire)
+  Fast Lane now has RSI guard (was bypassing all RSI checks — major gap)
 
 v9 Quality Improvements:
   min_confidence_balanced raised 68 → 73 (65-75 bucket had only 44% WR)
@@ -22,7 +30,7 @@ v8 Risk Management:
   SL primary   = vol_tier × 1H ATR
   SL surgical  = nearest 15m fractal swing      (kicks in when ATR-SL > 2.5% of price)
   SL noise flo = max(structural, N×ATR_15m)     (Tier1: 1.5×; Tier2/3: 2.0× — anti stop-hunt)
-  TP1          = max(1.0× ATR, 1.5× SL_dist)   (guaranteed R/R ≥ 1:1.5)
+  TP1          = max(1.0× ATR, 1.8× SL_dist)   (net R/R ≈ 1.6-1.76 after fees; clears 1.5 floor)
   TP2          = TP1 + 1.0× ATR                 (runner extension)
   On TP1 hit   → SL moves to entry + fees (breakeven)
   Leverage     = floor(Position_Budget / SL_Pct) (min 2x — skip signal if below)
@@ -315,10 +323,10 @@ async def score_symbol(symbol: str, timeframe: str, risk_profile: str = "balance
         # Volume sanity guard — thin markets are stop-huntable and show false momentum
         _avg_vol = float(df["volume"].rolling(20).mean().iloc[-1]) if len(df) >= 20 else float(df["volume"].iloc[-1])
         _vol_ratio = float(df["volume"].iloc[-1]) / (_avg_vol + 1e-10)
-        if _vol_ratio < 0.05:
+        if _vol_ratio < 0.15:
             logger.info(
                 f"Skipping {symbol}/{timeframe}: low volume ({_vol_ratio:.2f}x avg) — "
-                "thin market, entry unreliable"
+                "thin market, entry unreliable (min raised 0.05→0.15)"
             )
             return None
 
@@ -444,10 +452,12 @@ async def score_symbol(symbol: str, timeframe: str, risk_profile: str = "balance
             )
             return None
 
-        # ── v7 Task 5: ATR Scalp Targets ─────────────────────────────────────
-        # TP1 guaranteed ≥ 1.5× SL distance so R/R ≥ 1:1.5 is structurally enforced.
+        # ── v10 ATR Scalp Targets ────────────────────────────────────────────
+        # TP1 guaranteed ≥ 1.8× SL distance. After the 0.08% round-trip fee drag this
+        # yields net R/R ≈ 1.6–1.76, which clears the 1.5 runner floor (the old 1.5×
+        # multiplier capped net R/R at 1.46 and would reject every signal).
         # TP2 extends exactly one ATR beyond TP1 (runner target).
-        tp1_dist = max(atr_1h, sl_price_dist * 1.5)
+        tp1_dist = max(atr_1h, sl_price_dist * 1.8)
         tp2_dist = tp1_dist + atr_1h
 
         tp1_pct  = tp1_dist / price

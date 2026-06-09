@@ -19,7 +19,7 @@ from app.core.config_store import (
 from app.core.settings import settings
 from app.scheduler.runner import run_now, update_interval, scheduler
 from app.engine import binance
-from app.discord.bot import send_test_message, send_config_change
+from app.discord.bot import send_test_message, send_config_change, send_daily_digest
 from app.engine.dedup import get_state_summary, clear_symbol
 
 router = APIRouter()
@@ -388,6 +388,16 @@ async def test_discord():
     try:
         await send_test_message()
         return {"ok": True, "message": "Test message sent to Discord"}
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+@router.post("/discord/digest")
+async def trigger_digest(hours: int = 24):
+    """Manually fire the performance digest to Discord (also runs daily at 02:00 UTC)."""
+    try:
+        await send_daily_digest(hours)
+        return {"ok": True, "message": f"Digest ({hours}h) sent to Discord"}
     except Exception as e:
         raise HTTPException(502, str(e))
 

@@ -13,6 +13,7 @@ On a signal fire, place_signal_orders() places 4 orders:
 
 All orders are saved to the trade_order table linked to the signal_id.
 """
+import asyncio
 import functools
 import hmac
 import hashlib
@@ -115,6 +116,8 @@ async def _get_symbol_precision(
             price_tick = 0.01
             min_qty = 0.0
             min_notional = 5.0
+            max_qty = 0.0          # LOT_SIZE max
+            market_max_qty = 0.0   # MARKET_LOT_SIZE max (per single MARKET order)
             qty_precision = sym.get("quantityPrecision", 3)
 
             for f in sym.get("filters", []):
@@ -122,6 +125,9 @@ async def _get_symbol_precision(
                 if ft == "LOT_SIZE":
                     qty_step = float(f.get("stepSize", 1.0))
                     min_qty = float(f.get("minQty", 0.0))
+                    max_qty = float(f.get("maxQty", 0.0))
+                elif ft == "MARKET_LOT_SIZE":
+                    market_max_qty = float(f.get("maxQty", 0.0))
                 elif ft == "PRICE_FILTER":
                     price_tick = float(f.get("tickSize", 0.01))
                 elif ft == "MIN_NOTIONAL":
@@ -131,6 +137,9 @@ async def _get_symbol_precision(
                 "qty_step": qty_step,
                 "price_tick": price_tick,
                 "min_qty": min_qty,
+                "max_qty": max_qty,
+                # MARKET orders are capped by MARKET_LOT_SIZE; fall back to LOT_SIZE max
+                "market_max_qty": market_max_qty or max_qty,
                 "min_notional": min_notional,
                 "qty_precision": qty_precision,
             }
@@ -144,6 +153,8 @@ async def _get_symbol_precision(
         "qty_step": 0.001,
         "price_tick": 0.01,
         "min_qty": 0.001,
+        "max_qty": 0.0,
+        "market_max_qty": 0.0,
         "min_notional": 5.0,
         "qty_precision": 3,
     }
@@ -715,6 +726,152 @@ async def close_position_market(signal_id: int, symbol: str, direction: str) -> 
                 f"{r.status_code} {r.text}"
             )
             return False
+
+
+# ── Position reconciliation ───────────────────────────────────────────────────
+
+def _exec_credentials() -> Optional[tuple[str, str, str]]:
+    """Return (api_key, api_secret, base_url) for the active execution mode, or None."""
+    from app.core.config_store import get_execution_mode
+
+    mode = get_execution_mode()
+    if mode == "disabled":
+        return None
+    if mode == "testnet":
+        api_key, api_secret = settings.binance_testnet_api_key, settings.binance_testnet_api_secret
+        base_url = settings.binance_testnet_base_url
+    else:
+        api_key, api_secret = settings.binance_api_key, settings.binance_api_secret
+        base_url = settings.binance_base_url
+    if not api_key or not api_secret:
+        return None
+    return api_key, api_secret, base_url
+
+
+async def get_exchange_positions() -> list[dict]:
+    """
+    Query /fapi/v2/positionRisk and return all positions with non-zero size.
+
+    Each entry: {pair, amt (signed float), entry_price, upnl}.
+    Returns [] when execution is disabled or keys are missing.
+    """
+    creds = _exec_credentials()
+    if creds is None:
+        return []
+    api_key, api_secret, base_url = creds
+    headers = {"X-MBX-APIKEY": api_key}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"{base_url}/fapi/v2/positionRisk",
+                params=_signed_params({}, api_secret),
+                headers=headers,
+                timeout=10,
+            )
+        if r.status_code != 200:
+            logger.warning(f"[reconcile] positionRisk failed: {r.status_code} {r.text[:200]}")
+            return []
+        data = r.json()
+        if not isinstance(data, list):
+            logger.warning(f"[reconcile] positionRisk unexpected response: {data}")
+            return []
+        out = []
+        for p in data:
+            amt = float(p.get("positionAmt", 0) or 0)
+            if amt != 0:
+                out.append({
+                    "pair":        p.get("symbol"),
+                    "amt":         amt,
+                    "entry_price": float(p.get("entryPrice", 0) or 0),
+                    "upnl":        float(p.get("unRealizedProfit", 0) or 0),
+                })
+        return out
+    except Exception as e:
+        logger.warning(f"[reconcile] get_exchange_positions exception: {e}")
+        return []
+
+
+async def flatten_position_market(pair: str, position_amt: float) -> bool:
+    """
+    Close an exact exchange position by its live positionAmt with a reduceOnly MARKET order.
+    Used by reconciliation to flatten orphan positions that have no open DB signal —
+    independent of any TradeOrder qty in the DB.
+
+    `pair` is the Binance futures pair (e.g. "1000BONKUSDT"). `position_amt` is signed:
+    positive = long (close with SELL), negative = short (close with BUY).
+    """
+    creds = _exec_credentials()
+    if creds is None:
+        return False
+    api_key, api_secret, base_url = creds
+    headers = {"X-MBX-APIKEY": api_key}
+
+    close_side = "SELL" if position_amt > 0 else "BUY"
+    total_qty = abs(position_amt)
+
+    try:
+        async with httpx.AsyncClient() as client:
+            prec      = await _get_symbol_precision(client, pair, base_url, headers)
+            qty_step  = prec["qty_step"]
+            # Per-order ceiling: MARKET_LOT_SIZE max. Large positions must be split
+            # into multiple MARKET orders or Binance rejects with -4005.
+            chunk_max = prec.get("market_max_qty") or 0.0
+
+            total_r = _round_step(total_qty, qty_step)
+            if total_r <= 0:
+                logger.warning(f"[reconcile] flatten {pair}: qty rounds to 0 (amt={position_amt})")
+                return False
+
+            # Build chunk list respecting the per-order max
+            chunks: list[float] = []
+            if chunk_max and total_r > chunk_max:
+                remaining = total_r
+                while remaining > 1e-12:
+                    take = min(chunk_max, remaining)
+                    take = _round_step(take, qty_step)
+                    if take <= 0:
+                        break
+                    chunks.append(take)
+                    remaining = round(remaining - take, 12)
+            else:
+                chunks = [total_r]
+
+            all_ok = True
+            for i, q in enumerate(chunks):
+                params = _signed_params({
+                    "symbol":     pair,
+                    "side":       close_side,
+                    "type":       "MARKET",
+                    "quantity":   q,
+                    "reduceOnly": "true",
+                }, api_secret)
+                r = await client.post(
+                    f"{base_url}/fapi/v1/order",
+                    data=params,
+                    headers=headers,
+                    timeout=10,
+                )
+                if r.status_code == 200:
+                    logger.warning(
+                        f"[reconcile] ORPHAN FLATTENED {pair} {close_side} "
+                        f"chunk {i+1}/{len(chunks)} qty={q} orderId={r.json().get('orderId')}"
+                    )
+                else:
+                    code = r.json().get("code")
+                    if code == -2022:
+                        logger.info(f"[reconcile] flatten {pair}: position already flat — done")
+                        return True
+                    logger.warning(
+                        f"[reconcile] flatten {pair} chunk {i+1}/{len(chunks)} "
+                        f"failed: {r.status_code} {r.text[:200]}"
+                    )
+                    all_ok = False
+                await asyncio.sleep(0.15)
+            return all_ok
+    except Exception as e:
+        logger.warning(f"[reconcile] flatten_position_market {pair} exception: {e}")
+        return False
 
 
 # ── Equity-check decorator ────────────────────────────────────────────────────

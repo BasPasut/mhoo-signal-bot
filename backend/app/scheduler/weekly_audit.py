@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 WR_ALERT_THRESHOLD   = 0.55    # alert if 7-day WR drops below 55%
 WR_EXCLUSION_MIN     = 0.40    # auto-exclude symbol if WR < 40%
 EXCLUSION_MIN_TRADES = 8       # need at least this many resolved trades to exclude
-_last_watchdog_alert: Optional[datetime] = None
-_WATCHDOG_COOLDOWN_H = 6       # hours between repeated watchdog alerts
+_WATCHDOG_COOLDOWN_H = 12      # hours between repeated watchdog alerts
+# Cooldown timestamp is persisted in the Config table (key below) so it survives
+# BE restarts — an in-memory global reset on every redeploy, causing alert spam.
+_WATCHDOG_STATE_KEY  = "wr_watchdog_last_alert"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -219,15 +221,36 @@ async def run_weekly_audit():
 
 # ── Win-rate watchdog ─────────────────────────────────────────────────────────
 
+def _get_last_watchdog_alert() -> Optional[datetime]:
+    """Read the persisted last-alert timestamp (survives restarts)."""
+    try:
+        from app.core.config_store import get_config
+        raw = get_config(_WATCHDOG_STATE_KEY)
+        return datetime.fromisoformat(raw) if raw else None
+    except Exception:
+        return None
+
+
+def _set_last_watchdog_alert(ts: datetime):
+    try:
+        from app.core.config_store import set_config
+        set_config(_WATCHDOG_STATE_KEY, ts.isoformat())
+    except Exception as e:
+        logger.warning(f"[watchdog] failed to persist cooldown timestamp: {e}")
+
+
 async def run_wr_watchdog():
     """
     Check rolling 7-day WR after every scan. Alert on Discord if it drops
     below WR_ALERT_THRESHOLD. Fires at most once per WATCHDOG_COOLDOWN_H hours.
-    """
-    global _last_watchdog_alert
 
-    if _last_watchdog_alert is not None:
-        elapsed = datetime.utcnow() - _last_watchdog_alert
+    The cooldown timestamp is persisted in the Config table so it is NOT reset
+    by BE restarts/redeploys (the previous in-memory global caused alert spam,
+    re-firing on every restart while the 7-day WR was below threshold).
+    """
+    last_alert = _get_last_watchdog_alert()
+    if last_alert is not None:
+        elapsed = datetime.utcnow() - last_alert
         if elapsed < timedelta(hours=_WATCHDOG_COOLDOWN_H):
             return
 
@@ -246,7 +269,7 @@ async def run_wr_watchdog():
         f"[watchdog] 7-day WR={wr*100:.1f}% below {WR_ALERT_THRESHOLD*100:.0f}% "
         f"({wins}W/{losses}L over {len(decided)} signals)"
     )
-    _last_watchdog_alert = datetime.utcnow()
+    _set_last_watchdog_alert(datetime.utcnow())
 
     try:
         from app.discord.bot import send_watchdog_alert

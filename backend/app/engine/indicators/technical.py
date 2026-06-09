@@ -293,8 +293,8 @@ def _ctf_confirm(df_1h: pd.DataFrame, htf_direction: int) -> tuple[bool, str]:
         return False, f"1H MACD not bullish or single-bar flicker (hist={h_now:.4f}, prev={h_prev:.4f}, prev2={h_prev2:.4f})"
     else:
         if h_now < 0 and h_now < h_prev:
-            if rsi < 35:
-                return False, f"1H MACD bearish but RSI oversold ({rsi:.0f}) — skip"
+            if rsi < 40:
+                return False, f"1H MACD bearish but RSI oversold ({rsi:.0f}) — skip (gate raised 35→40)"
             return True, f"1H MACD bearish ({h_now:.4f} falling) | RSI {rsi:.0f}"
         return False, f"1H MACD not bearish (hist={h_now:.4f}, prev={h_prev:.4f})"
 
@@ -322,10 +322,10 @@ def _entry_trigger(df_entry: pd.DataFrame, htf_direction: int) -> tuple[bool, fl
 
     # Entry-TF RSI guard — don't enter SHORT into oversold or LONG into overbought
     _entry_rsi = float(ta.momentum.RSIIndicator(close, 14).rsi().iloc[-1])
-    if htf_direction == -1 and _entry_rsi < 35:
-        return False, 0.0, f"Entry RSI oversold ({_entry_rsi:.0f}) — bounce risk on SHORT"
-    if htf_direction == 1 and _entry_rsi > 65:
-        return False, 0.0, f"Entry RSI overbought ({_entry_rsi:.0f}) — pullback risk on LONG"
+    if htf_direction == -1 and _entry_rsi < 40:
+        return False, 0.0, f"Entry RSI oversold ({_entry_rsi:.0f}) — bounce risk on SHORT (gate 35→40)"
+    if htf_direction == 1 and _entry_rsi > 60:
+        return False, 0.0, f"Entry RSI overbought ({_entry_rsi:.0f}) — pullback risk on LONG (gate 65→60)"
 
     # BB metrics
     bb       = ta.volatility.BollingerBands(close, window=20, window_dev=2)
@@ -575,6 +575,14 @@ def _fast_lane_trigger(
 
     if not within_retest:
         return False, ""
+
+    # RSI guard — fast lane bypasses normal layers so we gate it here too
+    # SHORT into oversold (RSI<40) or LONG into overbought (RSI>60) → high reversal risk
+    _fl_rsi = float(ta.momentum.RSIIndicator(df_entry["close"], 14).rsi().iloc[-1])
+    if htf_direction == -1 and _fl_rsi < 40:
+        return False, f"Fast Lane: SHORT blocked — RSI {_fl_rsi:.0f} < 40 oversold"
+    if htf_direction == 1 and _fl_rsi > 60:
+        return False, f"Fast Lane: LONG blocked — RSI {_fl_rsi:.0f} > 60 overbought"
 
     # Volume speed check on 15m — must be 3x to confirm institutional flow (not FOMO)
     vol = df_entry["volume"]

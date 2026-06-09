@@ -12,7 +12,7 @@ from app.models.db import create_db_and_tables
 from app.scheduler.runner import start_scheduler
 from app.scheduler.outcome_tracker import start_outcome_tracker
 from app.scheduler.weekly_audit import run_weekly_audit
-from app.discord.bot import start_bot
+from app.discord.bot import start_bot, send_daily_digest
 from app.api.routes import router
 
 logging.basicConfig(
@@ -41,8 +41,17 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
+    # Daily performance digest → Discord at 02:00 UTC (09:00 Asia/Bangkok)
+    _audit_scheduler.add_job(
+        lambda: asyncio.create_task(send_daily_digest(24)),
+        trigger=CronTrigger(hour=2, minute=0, timezone="UTC"),
+        id="daily_digest",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     _audit_scheduler.start()
-    logger.info("Weekly audit scheduler started — fires Monday 00:05 UTC")
+    logger.info("Schedulers started — weekly audit (Mon 00:05 UTC), daily digest (02:00 UTC / 09:00 BKK)")
 
     yield
     logger.info("Shutting down...")

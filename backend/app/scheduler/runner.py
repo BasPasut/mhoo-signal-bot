@@ -93,7 +93,7 @@ async def _run_scan_inner():
 
     # ── Phase 2: Filter → build candidate list ────────────────────────────────
     candidates: list[dict] = []
-    _RR_MIN = 1.3
+    _RR_MIN = 1.5  # raised from 1.3 → all signals were clustering at 1.30-1.46 with negative EV
     allowed_tiers = get_signal_tiers()
 
     for symbol, signals in scan_results:

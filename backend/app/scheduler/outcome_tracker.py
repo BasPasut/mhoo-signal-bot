@@ -393,15 +393,97 @@ async def _notify_discord_tp1(sig: Signal, breakeven_sl: float):
         logger.warning(f"Discord TP1 notification failed: {e}")
 
 
+async def reconcile_positions():
+    """
+    Reconcile the exchange's actual open positions against our DB-open signals.
+
+    Catches two drift classes the per-signal close path can miss:
+      • ORPHAN  — a live exchange position with no corresponding open DB signal.
+                  (e.g. close_position_market failed, or no entry-order qty was stored.)
+                  These carry real exposure outside our risk logic → flatten with a
+                  reduceOnly MARKET order using the live positionAmt.
+      • STALE   — a DB-open signal whose symbol is flat on the exchange.
+                  (e.g. position closed on the exchange but the klines tracker hasn't
+                  resolved the row yet.)  Logged for visibility; the klines tracker
+                  owns the win/loss determination so we do NOT fabricate an outcome.
+
+    Runs only when execution is enabled (testnet/live) with valid API keys.
+    """
+    from app.core.config_store import get_execution_mode
+    from app.engine.execution import get_exchange_positions, flatten_position_market
+    from app.engine.binance import _futures_pair
+
+    if get_execution_mode() == "disabled":
+        return
+
+    positions = await get_exchange_positions()
+    # Empty positions with keys configured is a valid state, but we can't tell it
+    # apart from an auth failure here — get_exchange_positions already logs failures,
+    # so treat [] as "nothing on the exchange" and only act on the orphan branch.
+    exchange_pairs = {p["pair"]: p for p in positions}
+
+    with Session(engine) as s:
+        open_signals = s.exec(
+            select(Signal).where(Signal.result == None)  # noqa: E711
+        ).all()
+
+    # Map each open DB signal to its Binance pair (handles 1000x overrides, e.g. BONK→1000BONK)
+    db_open_pairs: dict[str, list[int]] = {}
+    for sig in open_signals:
+        pair = _futures_pair(sig.symbol)
+        db_open_pairs.setdefault(pair, []).append(sig.id)
+
+    # ── Orphans: on exchange, not tracked as open in DB → flatten ───────────────
+    orphans = [pair for pair in exchange_pairs if pair not in db_open_pairs]
+    for pair in orphans:
+        pos = exchange_pairs[pair]
+        logger.warning(
+            f"[reconcile] ORPHAN detected: {pair} amt={pos['amt']} "
+            f"uPnL={pos['upnl']:.3f} — no open DB signal, flattening"
+        )
+        await flatten_position_market(pair, pos["amt"])
+        await asyncio.sleep(0.2)
+
+    # ── Stale: open in DB, flat on exchange → log (klines tracker resolves it) ───
+    stale = [pair for pair in db_open_pairs if pair not in exchange_pairs]
+    for pair in stale:
+        logger.warning(
+            f"[reconcile] STALE DB-open: {pair} (signals {db_open_pairs[pair]}) "
+            f"is flat on exchange — awaiting klines resolution"
+        )
+
+    if orphans or stale:
+        logger.info(
+            f"[reconcile] sweep done: {len(exchange_pairs)} exchange pos, "
+            f"{len(db_open_pairs)} db-open pairs, {len(orphans)} orphan(s), {len(stale)} stale"
+        )
+
+
+# Run reconciliation every N outcome ticks (N×120s). 5 → ~10 min cadence.
+_RECONCILE_EVERY_N_TICKS = 5
+
+
 async def _run_outcome_loop():
+    tick = 0
     while True:
         try:
             await check_open_signals()
         except Exception as e:
             logger.error(f"Outcome tracker error: {e}")
+
+        tick += 1
+        if tick % _RECONCILE_EVERY_N_TICKS == 0:
+            try:
+                await reconcile_positions()
+            except Exception as e:
+                logger.error(f"Position reconciliation error: {e}")
+
         await asyncio.sleep(_CHECK_INTERVAL_SECONDS)
 
 
 def start_outcome_tracker():
     asyncio.create_task(_run_outcome_loop())
-    logger.info("Outcome tracker started (120 s interval, 2-phase klines resolution)")
+    logger.info(
+        "Outcome tracker started (120 s interval, 2-phase klines resolution, "
+        f"reconciliation every {_RECONCILE_EVERY_N_TICKS} ticks)"
+    )
