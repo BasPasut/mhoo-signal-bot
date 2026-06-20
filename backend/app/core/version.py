@@ -10,10 +10,11 @@ contaminate the metrics of the current algo.
 Keep CHANGELOG entries short — they surface in the version picker UI.
 """
 
-ALGO_VERSION = "v15"
+ALGO_VERSION = "v16"
 
 # version → one-line description shown in the Performance version picker
 ALGO_CHANGELOG = {
+    "v16": "Closed-candle decisions — entry stack no longer fires on the forming candle (kills the <2h/3%-WR noise cohort)",
     "v15": "Market-context gate — no SHORT into capitulation (FNG<20), trend-establishment via EMA200",
     "legacy": "Pre-v15 signals (mixed v9–v14 logic, not directly comparable)",
 }

@@ -235,27 +235,28 @@ async def send_server_info():
         # one long block (a single combined block hit 1033 and was rejected with
         # error 50035 Invalid Form Body, silently dropping the deploy notification).
         embed.add_field(
-            name="⚙️  Algorithm  v15  (market-context gate — 129-signal audit)",
+            name="⚙️  Algorithm  v16  (closed-candle decisions)",
             value=(
                 "**Layer 0** Daily macro gate — EMA20/50 + slope + HH/HL structure\n"
                 "**Layer 1** 4H HTF — EMA200 + ADX ≥ 12 + ATR-RSI guard\n"
                 "**Layer 2** 1H CTF — MACD histogram direction | RSI SHORT <35 blocked\n"
                 "**Layer 3** 15m entry — BB Squeeze | RSI SHORT band-pass 31-41\n"
-                "**NEW Market-Context Gate** — FNG + EMA200 trend filter\n"
+                "**Market-Context Gate** (v15) — FNG + EMA200 trend filter\n"
                 "**SMC** Order Blocks + FVGs + Liquidity Sweeps (+0–0.30 boost)"
             ),
             inline=False,
         )
         embed.add_field(
-            name="📊  v15 changes (audit: system was −0.15R/trade, 36% WR)",
+            name="📊  v16 change — entry decisions on CLOSED candles only",
             value=(
-                "• **Capitulation gate** — no SHORT when Fear&Greed < 20; panic\n"
-                "   bounces stopped shorts out at 29% WR (no LONG when FNG > 80)\n"
-                "• **Trend-establishment gate** — SHORT only when price clearly\n"
-                "   below EMA200 (early shorts won 11–26%, established ones 56%)\n"
-                "• Backtested on our own outcomes: flips to +0.27R (≈53% WR),\n"
-                "   firing on the best ~26% of setups — quality over quantity\n"
-                "• Carries v14: TP1 1.1× SL scalp, risk capped at PRIME"
+                "Audit found trades resolving in <2h won just **3%** (n=35, 34 of\n"
+                "them 15m) and looked identical to winners at entry. Cause: the\n"
+                "entry stack was reading Binance's still-**forming** candle, so a\n"
+                "mid-bar spike could fire a signal that reverted by candle close.\n"
+                "• v16 drops the forming bar — every decision uses closed data\n"
+                "• Entry/SL/TP still anchor to the live price; only the *decision*\n"
+                "   waits for the bar to close\n"
+                "• Carries v15 market-context gate + v14 PRIME-capped risk"
             ),
             inline=False,
         )

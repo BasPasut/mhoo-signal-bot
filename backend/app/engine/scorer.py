@@ -348,6 +348,23 @@ async def score_symbol(symbol: str, timeframe: str, risk_profile: str = "balance
         if df is None or len(df) < 50:
             return None
 
+        # ── v16 Closed-candle decisions ──────────────────────────────────────
+        # Binance /klines returns the still-FORMING candle as the last row. The
+        # entry stack (BB breakout, RSI, price-vs-midline, volume) was evaluating
+        # `.iloc[-1]` = the live, unclosed candle. On 15m that candle can spike a
+        # "breakout + volume" mid-bar, fire a SHORT, then revert and close back
+        # inside the band → an instant loss. The 159-trade audit showed exactly
+        # this signature: trades resolving in <2h won 3% (n=35, 34 of them 15m),
+        # and those losers looked statistically identical to winners at entry
+        # because the forming candle lied. Drop the forming bar so every signal
+        # decision is made on CLOSED data. Actual entry/SL/TP still anchor to the
+        # live price fetched further below — only the *decision* uses closed bars.
+        def _closed(d):
+            return d.iloc[:-1] if (d is not None and len(d) > 1) else d
+        df, df_1h, df_15m, df_4h = _closed(df), _closed(df_1h), _closed(df_15m), _closed(df_4h)
+        if df is None or len(df) < 50:
+            return None
+
         price = float(df["close"].iloc[-1])
 
         # Volume sanity guard — thin markets are stop-huntable and show false momentum
