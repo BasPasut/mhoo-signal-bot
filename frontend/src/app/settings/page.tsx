@@ -13,6 +13,8 @@ const PRIORITY_BIASES = ["Highest Confidence", "Lowest Risk"] as const;
 export default function SettingsPage() {
   const [config, setConfig] = useState<any>(null);
   const [watchlist, setWatchlist] = useState("");
+  const [wlInput, setWlInput] = useState("");
+  const [wlFilter, setWlFilter] = useState("");
   const [signalTiers, setSignalTiers] = useState<string[]>(["ALPHA", "PRIME", "SETUP"]);
   const [scanInterval, setScanInterval] = useState(300);
   const [maxOpenPositions, setMaxOpenPositions] = useState(5);
@@ -83,6 +85,26 @@ export default function SettingsPage() {
     }
   };
 
+  // ── Watchlist chip helpers ──────────────────────────────────────────────
+  const wlArray = watchlist.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+
+  const addSymbols = (raw: string) => {
+    const incoming = raw.split(/[\s,]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
+    if (!incoming.length) return;
+    const merged = Array.from(new Set([...wlArray, ...incoming]));
+    setWatchlist(merged.join(","));
+    setWlInput("");
+  };
+  const removeSymbol = (sym: string) =>
+    setWatchlist(wlArray.filter((s) => s !== sym).join(","));
+  const clearWatchlist = () => { setWatchlist(""); setWlFilter(""); };
+  const sortWatchlist = () =>
+    setWatchlist([...wlArray].sort((a, b) => a.localeCompare(b)).join(","));
+
+  const visibleSymbols = wlFilter
+    ? wlArray.filter((s) => s.includes(wlFilter.toUpperCase()))
+    : wlArray;
+
   if (loadError) {
     return (
       <div className="rounded-lg bg-red-900/30 border border-red-500/40 px-4 py-3 text-sm text-red-400">
@@ -103,18 +125,90 @@ export default function SettingsPage() {
       </div>
 
       {/* Watchlist */}
-      <div className="card space-y-2">
-        <h2 className="font-semibold text-white">Watchlist</h2>
-        <p className="text-xs text-gray-500">Comma-separated Binance USDT-M perpetual base assets</p>
-        <input
-          className="input"
-          value={watchlist}
-          onChange={(e) => setWatchlist(e.target.value)}
-          placeholder="BTC, ETH, XRP, SOL"
-        />
-        <p className="text-xs text-gray-600">
-          Current: {watchlist.split(",").filter(Boolean).length} symbol(s)
-        </p>
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold text-white">Watchlist</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Binance USDT-M perpetual base assets the scanner tracks</p>
+          </div>
+          <span className="shrink-0 rounded-full bg-emerald-600/15 border border-emerald-500/30 px-2.5 py-1 text-xs font-semibold text-emerald-400">
+            {wlArray.length} {wlArray.length === 1 ? "coin" : "coins"}
+          </span>
+        </div>
+
+        {/* Add box */}
+        <div className="flex gap-2">
+          <input
+            className="input flex-1"
+            value={wlInput}
+            onChange={(e) => setWlInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addSymbols(wlInput); }
+            }}
+            onBlur={() => wlInput.trim() && addSymbols(wlInput)}
+            placeholder="Add symbol(s) — e.g. BTC, ETH, SOL  (Enter to add)"
+          />
+          <button
+            type="button"
+            onClick={() => addSymbols(wlInput)}
+            disabled={!wlInput.trim()}
+            className="shrink-0 px-3 rounded-lg text-sm font-medium border border-emerald-500/40 bg-emerald-600/15 text-emerald-400 hover:bg-emerald-600/25 disabled:opacity-40 transition-colors"
+          >
+            Add
+          </button>
+        </div>
+
+        {/* Filter (only when list is long) */}
+        {wlArray.length > 12 && (
+          <input
+            className="input"
+            value={wlFilter}
+            onChange={(e) => setWlFilter(e.target.value)}
+            placeholder={`Filter ${wlArray.length} symbols…`}
+          />
+        )}
+
+        {/* Chips */}
+        {wlArray.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-gray-700 px-4 py-6 text-center text-xs text-gray-600">
+            No symbols yet — add some above to start scanning.
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5 max-h-52 overflow-y-auto rounded-lg bg-gray-900/40 border border-gray-800 p-2.5">
+            {visibleSymbols.map((sym) => (
+              <span
+                key={sym}
+                className="group inline-flex items-center gap-1 rounded-md bg-gray-800 border border-gray-700 pl-2 pr-1 py-1 text-xs font-medium text-gray-200 hover:border-gray-600"
+              >
+                {sym}
+                <button
+                  type="button"
+                  onClick={() => removeSymbol(sym)}
+                  aria-label={`Remove ${sym}`}
+                  className="flex items-center justify-center w-4 h-4 rounded text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+            {wlFilter && visibleSymbols.length === 0 && (
+              <span className="text-xs text-gray-600 px-1 py-1">No match for “{wlFilter}”.</span>
+            )}
+          </div>
+        )}
+
+        {/* Quick actions */}
+        {wlArray.length > 0 && (
+          <div className="flex items-center gap-3 text-xs">
+            <button type="button" onClick={sortWatchlist} className="text-gray-500 hover:text-gray-300 transition-colors">
+              Sort A–Z
+            </button>
+            <span className="text-gray-700">·</span>
+            <button type="button" onClick={clearWatchlist} className="text-gray-500 hover:text-red-400 transition-colors">
+              Clear all
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Signal tiers */}
