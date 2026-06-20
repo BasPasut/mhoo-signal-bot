@@ -230,25 +230,32 @@ async def send_server_info():
         )
         embed.add_field(name="🖥️  Server IP", value=f"`{ip}`", inline=True)
         embed.add_field(name="🕐  Restarted (UTC)", value=f"`{now.strftime('%Y-%m-%d %H:%M:%S')}`", inline=True)
+        # NOTE: Discord embed field `value` max = 1024 chars. Keep each field well
+        # under that — split layer stack and changelog into two fields rather than
+        # one long block (a single combined block hit 1033 and was rejected with
+        # error 50035 Invalid Form Body, silently dropping the deploy notification).
         embed.add_field(
             name="⚙️  Algorithm  v15  (market-context gate — 129-signal audit)",
             value=(
                 "**Layer 0** Daily macro gate — EMA20/50 + slope + HH/HL structure\n"
                 "**Layer 1** 4H HTF — EMA200 + ADX ≥ 12 + ATR-RSI guard\n"
                 "**Layer 2** 1H CTF — MACD histogram direction | RSI SHORT <35 blocked\n"
-                "**Layer 3** 15m entry — BB Squeeze | RSI SHORT band-pass 31-41 / LONG >60 blocked\n"
+                "**Layer 3** 15m entry — BB Squeeze | RSI SHORT band-pass 31-41\n"
                 "**NEW Market-Context Gate** — FNG + EMA200 trend filter\n"
-                "**SMC** Order Blocks + FVGs + Liquidity Sweeps (+0–0.30 boost)\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "**v15 (129-signal audit: system was −0.15R/trade, 36% WR):**\n"
-                "• **Capitulation gate** — no SHORT when Fear&Greed < 20; panic bounces\n"
-                "   stopped shorts out at 29% WR. No LONG when FNG > 80 (euphoria fade)\n"
-                "• **Trend-establishment gate** — SHORT only when price clearly below\n"
-                "   EMA200 (early shorts won 11–26%, established downtrends won 56%)\n"
-                "• Backtested on our own outcomes: flips to +0.27R (≈53% WR), firing\n"
-                "   on the best ~26% of setups — deliberately quality over quantity\n"
-                "• Carries forward v14: TP1 1.1× SL reachable scalp, risk capped at\n"
-                "   PRIME (confidence inverted above 80%), LONG/SHORT gated equally"
+                "**SMC** Order Blocks + FVGs + Liquidity Sweeps (+0–0.30 boost)"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="📊  v15 changes (audit: system was −0.15R/trade, 36% WR)",
+            value=(
+                "• **Capitulation gate** — no SHORT when Fear&Greed < 20; panic\n"
+                "   bounces stopped shorts out at 29% WR (no LONG when FNG > 80)\n"
+                "• **Trend-establishment gate** — SHORT only when price clearly\n"
+                "   below EMA200 (early shorts won 11–26%, established ones 56%)\n"
+                "• Backtested on our own outcomes: flips to +0.27R (≈53% WR),\n"
+                "   firing on the best ~26% of setups — quality over quantity\n"
+                "• Carries v14: TP1 1.1× SL scalp, risk capped at PRIME"
             ),
             inline=False,
         )
