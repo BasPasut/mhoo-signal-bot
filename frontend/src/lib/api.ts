@@ -22,11 +22,17 @@ export const api = {
   price: (symbol: string) => request<any>(`/price/${symbol}`),
   health: () => request<any>("/health"),
   testDiscord: () => request<any>("/discord/test", { method: "POST" }),
-  calibration: () => request<any[]>("/signals/calibration"),
-  performance: () => request<any[]>("/performance"),
+  calibration: (version?: string) =>
+    request<any[]>(`/signals/calibration${version ? `?version=${version}` : ""}`),
+  performance: (version?: string) =>
+    request<any[]>(`/performance${version ? `?version=${version}` : ""}`),
   mlStats: () => request<any>("/ml/stats"),
   mlExport: () => request<any[]>("/ml/export"),
-  equityCurve: () => request<{ summary: any; curve: any[] }>("/performance/equity-curve"),
+  equityCurve: (version?: string) =>
+    request<{ summary: any; curve: any[]; regimes: any[] }>(
+      `/performance/equity-curve${version ? `?version=${version}` : ""}`
+    ),
+  versions: () => request<{ current: string; versions: any[] }>("/performance/versions"),
   analytics: () => request<any>("/signals/analytics"),
   orders: (params?: { signal_id?: number }) => {
     const qs = params?.signal_id ? `?signal_id=${params.signal_id}` : "";

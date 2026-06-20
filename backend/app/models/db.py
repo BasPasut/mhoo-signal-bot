@@ -50,6 +50,15 @@ def _migrate(eng):
         if "breakeven_sl" not in cols:
             conn.execute(text("ALTER TABLE signal ADD COLUMN breakeven_sl FLOAT"))
             conn.commit()
+        if "algo_version" not in cols:
+            conn.execute(text("ALTER TABLE signal ADD COLUMN algo_version VARCHAR"))
+            # Backfill: every existing signal predates v15 → tag as legacy so it
+            # never mixes with current-algo metrics.
+            conn.execute(text("UPDATE signal SET algo_version = 'legacy' WHERE algo_version IS NULL"))
+            conn.commit()
+        if "market_regime" not in cols:
+            conn.execute(text("ALTER TABLE signal ADD COLUMN market_regime VARCHAR"))
+            conn.commit()
 
         # trade_order table — auto-execution layer
         if "trade_order" not in inspect(eng).get_table_names():
@@ -127,6 +136,12 @@ class Signal(SQLModel, table=True):
     tp1_hit: bool = Field(default=False)
     tp1_hit_at: Optional[datetime] = None
     breakeven_sl: Optional[float] = None   # SL price after TP1 (entry ± fee buffer)
+
+    # Provenance — which algo version produced this signal, and the market regime
+    # it fired in. Lets Performance segment data so old logic/regimes don't pollute
+    # current-algo metrics.
+    algo_version: Optional[str] = None     # e.g. "v15"; "legacy" = pre-versioning
+    market_regime: Optional[str] = None    # "bull" | "bear" | "sideways"
 
     @property
     def triggers(self) -> List[dict]:

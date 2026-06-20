@@ -17,6 +17,7 @@ from app.engine.signal_queue import prioritize_signals
 from app.core.ws import manager
 from app.discord.bot import send_signal
 from app.models.db import Signal, engine
+from app.core.version import ALGO_VERSION
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
@@ -179,6 +180,8 @@ async def _run_scan_inner():
                 volume_ratio=signal["meta"].get("volume_ratio"),
                 funding_rate=signal["meta"].get("funding_rate"),
                 fear_greed=signal["meta"].get("fear_greed_value"),
+                algo_version=ALGO_VERSION,
+                market_regime=signal.get("regime"),
             )
             row.triggers = signal["triggers"]
 

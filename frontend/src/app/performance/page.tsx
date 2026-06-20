@@ -178,16 +178,17 @@ function EquityCurveChart({ curve, startingBalance }: { curve: any[]; startingBa
 
 // ── Portfolio panel ───────────────────────────────────────────────────────────
 
-function PortfolioPanel() {
-  const [data, setData] = useState<{ summary: any; curve: any[] } | null>(null);
+function PortfolioPanel({ version }: { version?: string }) {
+  const [data, setData] = useState<{ summary: any; curve: any[]; regimes: any[] } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.equityCurve()
+    setLoading(true);
+    api.equityCurve(version)
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [version]);
 
   if (loading) return <div className="card py-8 text-center text-gray-500 text-sm animate-pulse">Loading portfolio...</div>;
 
@@ -286,6 +287,39 @@ function PortfolioPanel() {
 
       {/* Equity curve chart */}
       <EquityCurveChart curve={curve} startingBalance={summary.starting_balance} />
+
+      {/* Market-regime breakdown — does this algo work in all conditions? */}
+      {data.regimes && data.regimes.some((r) => r.total > 0) && (
+        <div className="space-y-2">
+          <div className="text-xs text-gray-500">
+            Win rate by market regime
+            <span className="text-gray-600"> — shows whether this version holds up across conditions</span>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {["bull", "bear", "sideways"].map((rg) => {
+              const r = data.regimes.find((x) => x.regime === rg);
+              const wr = r?.win_rate ?? null;
+              const n = r?.total ?? 0;
+              const icon = rg === "bull" ? "📈" : rg === "bear" ? "📉" : "↔️";
+              const color = wr == null ? "text-gray-600" : wr >= 50 ? "text-emerald-400" : wr >= 40 ? "text-yellow-400" : "text-red-400";
+              return (
+                <div key={rg} className="bg-gray-800/40 rounded-lg p-2.5 text-center">
+                  <div className="text-[10px] text-gray-500 capitalize">{icon} {rg}</div>
+                  <div className={clsx("text-lg font-bold mt-0.5", color)}>
+                    {wr != null ? `${wr}%` : "—"}
+                  </div>
+                  <div className="text-[9px] text-gray-700">{n} {n === 1 ? "trade" : "trades"}</div>
+                </div>
+              );
+            })}
+          </div>
+          {data.regimes.find((x) => x.regime === "unknown" && x.total > 0) && (
+            <p className="text-[10px] text-gray-600">
+              Legacy signals predate regime tracking and aren&apos;t shown here. New {version ?? "current"} signals are tagged automatically.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Disclaimer */}
       <p className="text-[10px] text-gray-600">
@@ -436,12 +470,12 @@ const CAL_COLOR: Record<string, string> = {
   SETUP: "text-orange-400",
 };
 
-function GradeCalibration() {
+function GradeCalibration({ version }: { version?: string }) {
   const [rows, setRows] = useState<CalRow[]>([]);
 
   useEffect(() => {
-    api.calibration().then((data: any[]) => setRows(data)).catch(console.error);
-  }, []);
+    api.calibration(version).then((data: any[]) => setRows(data)).catch(console.error);
+  }, [version]);
 
   const hasData = rows.some(r => r.wins + r.losses > 0);
   if (!hasData) return null;
@@ -505,18 +539,91 @@ function GradeCalibration() {
 }
 
 
+// ── Algo version picker ───────────────────────────────────────────────────────
+
+function VersionPicker({
+  versions, current, value, onChange,
+}: {
+  versions: any[]; current: string; value: string; onChange: (v: string) => void;
+}) {
+  if (!versions.length) return null;
+  const options = [{ version: "all", description: "Every signal, all algo versions combined", total: versions.reduce((a, v) => a + v.total, 0), win_rate: null, is_current: false }, ...versions];
+  const sel = options.find((o) => o.version === value);
+
+  return (
+    <div className="card space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-white text-sm">Algorithm version</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Performance is segmented by the algo version that produced each signal — old logic never pollutes current metrics.
+          </p>
+        </div>
+        <span className="shrink-0 rounded-full bg-sky-600/15 border border-sky-500/30 px-2.5 py-1 text-xs font-semibold text-sky-400">
+          live: {current}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {options.map((o) => {
+          const active = o.version === value;
+          return (
+            <button
+              key={o.version}
+              onClick={() => onChange(o.version)}
+              className={clsx(
+                "px-3 py-1.5 rounded-lg text-xs font-medium border transition-all",
+                active
+                  ? "bg-emerald-600/20 border-emerald-500 text-emerald-300"
+                  : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500"
+              )}
+            >
+              {o.version === "all" ? "All" : o.version}
+              {o.is_current && <span className="ml-1 text-emerald-500">●</span>}
+              <span className="ml-1.5 text-gray-600">{o.total}</span>
+            </button>
+          );
+        })}
+      </div>
+      {sel?.description && (
+        <p className="text-xs text-gray-500 border-l-2 border-gray-700 pl-2">
+          {sel.description}
+          {sel.win_rate != null && <span className="text-gray-400"> · live WR {sel.win_rate}%</span>}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function PerformancePage() {
   const [rows, setRows] = useState<PerfRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"symbol" | "wr" | "total">("wr");
+  const [versions, setVersions] = useState<any[]>([]);
+  const [current, setCurrent] = useState<string>("");
+  const [version, setVersion] = useState<string>("");
+
+  // Load version list first; default the view to the current (live) algo version
+  useEffect(() => {
+    api.versions()
+      .then((d) => {
+        setVersions(d.versions);
+        setCurrent(d.current);
+        // default to current version if it has data, else "all"
+        const hasCurrent = d.versions.some((v) => v.version === d.current && v.total > 0);
+        setVersion(hasCurrent ? d.current : "all");
+      })
+      .catch(() => setVersion("all"));
+  }, []);
 
   useEffect(() => {
+    if (!version) return;
+    setLoading(true);
     api
-      .performance()
+      .performance(version)
       .then(setRows)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [version]);
 
   const sorted = [...rows].sort((a, b) => {
     if (sort === "wr") return (b.win_rate ?? -1) - (a.win_rate ?? -1);
@@ -533,11 +640,14 @@ export default function PerformancePage() {
         </p>
       </div>
 
+      {/* Algo version picker */}
+      <VersionPicker versions={versions} current={current} value={version} onChange={setVersion} />
+
       {/* Paper portfolio — always visible */}
-      <PortfolioPanel />
+      <PortfolioPanel version={version} />
 
       {/* Grade calibration — always visible once data exists */}
-      <GradeCalibration />
+      <GradeCalibration version={version} />
 
       {loading ? (
         <div className="text-gray-500 text-sm animate-pulse">Loading...</div>

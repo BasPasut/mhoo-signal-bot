@@ -123,7 +123,14 @@ def _actual_rr(sig) -> float:
     return sig.risk_reward or 1.5
 
 
-def equity_curve(starting_balance: float | None = None) -> list[dict]:
+def _apply_version(query, Signal, version: Optional[str]):
+    """Filter a Signal query by algo_version. `None`/'all' means no filter."""
+    if version and version != "all":
+        return query.where(Signal.algo_version == version)
+    return query
+
+
+def equity_curve(starting_balance: float | None = None, version: Optional[str] = None) -> list[dict]:
     """
     Compute a hypothetical paper-trading equity curve from all resolved signals.
 
@@ -144,11 +151,9 @@ def equity_curve(starting_balance: float | None = None) -> list[dict]:
         from sqlalchemy import asc
         from app.models.db import Signal, engine
         with Session(engine) as s:
-            resolved = s.exec(
-                select(Signal)
-                .where(Signal.result.in_(["win", "loss", "breakeven"]))  # type: ignore
-                .order_by(asc(Signal.result_at))
-            ).all()
+            q = select(Signal).where(Signal.result.in_(["win", "loss", "breakeven"]))  # type: ignore
+            q = _apply_version(q, Signal, version)
+            resolved = s.exec(q.order_by(asc(Signal.result_at))).all()
     except Exception as e:
         logger.error(f"equity_curve query failed: {e}")
         return []
@@ -200,12 +205,12 @@ def equity_curve(starting_balance: float | None = None) -> list[dict]:
     return curve
 
 
-def portfolio_summary(starting_balance: float | None = None) -> dict:
+def portfolio_summary(starting_balance: float | None = None, version: Optional[str] = None) -> dict:
     """Aggregate metrics derived from the equity curve."""
     if starting_balance is None:
         from app.core.config_store import get_starting_balance
         starting_balance = get_starting_balance()
-    curve = equity_curve(starting_balance)
+    curve = equity_curve(starting_balance, version=version)
 
     empty = {
         "starting_balance": starting_balance,
@@ -277,16 +282,15 @@ def portfolio_summary(starting_balance: float | None = None) -> dict:
     }
 
 
-def get_all_stats() -> list[dict]:
+def get_all_stats(version: Optional[str] = None) -> list[dict]:
     """Return performance breakdown for all symbol/timeframe pairs."""
     try:
         from sqlmodel import Session, select
         from app.models.db import Signal, engine
         with Session(engine) as s:
-            rows = s.exec(
-                select(Signal)
-                .where(Signal.result.in_(["win", "loss", "expired", "breakeven"]))  # type: ignore
-            ).all()
+            q = select(Signal).where(Signal.result.in_(["win", "loss", "expired", "breakeven"]))  # type: ignore
+            q = _apply_version(q, Signal, version)
+            rows = s.exec(q).all()
     except Exception as e:
         logger.error(f"get_all_stats failed: {e}")
         return []
@@ -327,3 +331,96 @@ def get_all_stats() -> list[dict]:
             "avg_duration_hours": round(avg_dur, 1) if avg_dur is not None else None,
         })
     return result
+
+
+def list_versions() -> list[dict]:
+    """
+    Return every algo_version present in the DB with trade counts + date range,
+    newest activity first. Powers the Performance version picker.
+    """
+    try:
+        from sqlmodel import Session, select
+        from app.models.db import Signal, engine
+        from app.core.version import ALGO_VERSION, ALGO_CHANGELOG
+        with Session(engine) as s:
+            rows = s.exec(select(Signal)).all()
+    except Exception as e:
+        logger.error(f"list_versions failed: {e}")
+        return []
+
+    agg: dict[str, dict] = defaultdict(
+        lambda: {"total": 0, "wins": 0, "losses": 0, "open": 0, "last": None}
+    )
+    for sig in rows:
+        v = sig.algo_version or "legacy"
+        a = agg[v]
+        a["total"] += 1
+        if sig.result == "win":
+            a["wins"] += 1
+        elif sig.result == "loss":
+            a["losses"] += 1
+        elif sig.result is None:
+            a["open"] += 1
+        ts = sig.result_at or sig.created_at
+        if ts and (a["last"] is None or ts > a["last"]):
+            a["last"] = ts
+
+    out = []
+    for v, a in agg.items():
+        decided = a["wins"] + a["losses"]
+        out.append({
+            "version": v,
+            "is_current": v == ALGO_VERSION,
+            "description": ALGO_CHANGELOG.get(v, ""),
+            "total": a["total"],
+            "wins": a["wins"],
+            "losses": a["losses"],
+            "open": a["open"],
+            "win_rate": round(a["wins"] / decided * 100, 1) if decided else None,
+            "last_activity": a["last"].isoformat() + "Z" if a["last"] else None,
+        })
+    # Current version first, then by most recent activity
+    out.sort(key=lambda x: (not x["is_current"], x["last_activity"] or ""), reverse=False)
+    return out
+
+
+def regime_breakdown(version: Optional[str] = None) -> list[dict]:
+    """
+    Win rate per market regime (bull/bear/sideways) for the selected version.
+    Directly answers "does this algo work in all market conditions?".
+    """
+    try:
+        from sqlmodel import Session, select
+        from app.models.db import Signal, engine
+        with Session(engine) as s:
+            q = select(Signal).where(Signal.result.in_(["win", "loss", "breakeven"]))  # type: ignore
+            q = _apply_version(q, Signal, version)
+            rows = s.exec(q).all()
+    except Exception as e:
+        logger.error(f"regime_breakdown failed: {e}")
+        return []
+
+    agg: dict[str, dict] = defaultdict(lambda: {"wins": 0, "losses": 0, "breakevens": 0})
+    for sig in rows:
+        r = sig.market_regime or "unknown"
+        if sig.result == "win":
+            agg[r]["wins"] += 1
+        elif sig.result == "loss":
+            agg[r]["losses"] += 1
+        else:
+            agg[r]["breakevens"] += 1
+
+    order = {"bull": 0, "bear": 1, "sideways": 2, "unknown": 3}
+    out = []
+    for regime, a in agg.items():
+        decided = a["wins"] + a["losses"]
+        out.append({
+            "regime": regime,
+            "wins": a["wins"],
+            "losses": a["losses"],
+            "breakevens": a["breakevens"],
+            "total": decided + a["breakevens"],
+            "win_rate": round(a["wins"] / decided * 100, 1) if decided else None,
+        })
+    out.sort(key=lambda x: order.get(x["regime"], 9))
+    return out

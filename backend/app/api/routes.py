@@ -127,9 +127,12 @@ async def signal_analytics(session: Session = Depends(get_session)):
 
 
 @router.get("/signals/calibration")
-async def signal_calibration(session: Session = Depends(get_session)):
+async def signal_calibration(version: Optional[str] = None, session: Session = Depends(get_session)):
     """Live win rate per confidence tier vs backtest expectation."""
-    signals = session.exec(select(Signal)).all()
+    q = select(Signal)
+    if version and version != "all":
+        q = q.where(Signal.algo_version == version)
+    signals = session.exec(q).all()
     expected = {"ALPHA": 75, "PRIME": 60, "SETUP": 45}
     buckets: dict[str, dict] = {t: {"wins": 0, "losses": 0, "total": 0} for t in expected}
 
@@ -521,18 +524,26 @@ async def ml_export(session: Session = Depends(get_session)):
 # ── Performance stats ─────────────────────────────────────────
 
 @router.get("/performance")
-async def performance_stats():
+async def performance_stats(version: Optional[str] = None):
     from app.engine.performance import get_all_stats
-    return get_all_stats()
+    return get_all_stats(version=version)
 
 
 @router.get("/performance/equity-curve")
-async def performance_equity_curve():
-    from app.engine.performance import equity_curve, portfolio_summary
+async def performance_equity_curve(version: Optional[str] = None):
+    from app.engine.performance import equity_curve, portfolio_summary, regime_breakdown
     return {
-        "summary": portfolio_summary(),
-        "curve": equity_curve(),
+        "summary": portfolio_summary(version=version),
+        "curve": equity_curve(version=version),
+        "regimes": regime_breakdown(version=version),
     }
+
+
+@router.get("/performance/versions")
+async def performance_versions():
+    from app.engine.performance import list_versions
+    from app.core.version import ALGO_VERSION
+    return {"current": ALGO_VERSION, "versions": list_versions()}
 
 
 # ── Dedup state (debug) ───────────────────────────────────────
