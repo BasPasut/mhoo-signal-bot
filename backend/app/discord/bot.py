@@ -231,22 +231,24 @@ async def send_server_info():
         embed.add_field(name="🖥️  Server IP", value=f"`{ip}`", inline=True)
         embed.add_field(name="🕐  Restarted (UTC)", value=f"`{now.strftime('%Y-%m-%d %H:%M:%S')}`", inline=True)
         embed.add_field(
-            name="⚙️  Algorithm  v12  (emergency fix — RSI gate + volume + R/R tightened)",
+            name="⚙️  Algorithm  v15  (market-context gate — 129-signal audit)",
             value=(
                 "**Layer 0** Daily macro gate — EMA20/50 + slope + HH/HL structure\n"
                 "**Layer 1** 4H HTF — EMA200 + ADX ≥ 12 + ATR-RSI guard\n"
-                "**Layer 2** 1H CTF — MACD histogram direction | RSI SHORT gate: <40 blocked\n"
-                "**Layer 3** 15m/1h entry — BB Squeeze | RSI SHORT <40 / LONG >60 blocked\n"
-                "**Fast Lane** 4H impulse + 50% retest | NOW has RSI gate (was missing!)\n"
+                "**Layer 2** 1H CTF — MACD histogram direction | RSI SHORT <35 blocked\n"
+                "**Layer 3** 15m entry — BB Squeeze | RSI SHORT band-pass 31-41 / LONG >60 blocked\n"
+                "**NEW Market-Context Gate** — FNG + EMA200 trend filter\n"
                 "**SMC** Order Blocks + FVGs + Liquidity Sweeps (+0–0.30 boost)\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "**v12 emergency fixes (Jun 2026 audit: 3W/32L in 3 days):**\n"
-                "• RSI SHORT gate raised 35 → 40 (oversold bounce risk on L2, L3, Fast Lane)\n"
-                "• RSI LONG gate tightened 65 → 60 (overbought pullback risk on L3, Fast Lane)\n"
-                "• Fast Lane now has RSI guard — was bypassing ALL RSI checks (critical gap)\n"
-                "• Volume minimum raised 0.05 → 0.15 (thin markets had worst loss rate)\n"
-                "• R/R minimum raised 1.3 → 1.5 (all signals were at 1.30-1.46; EV negative)\n"
-                "• Expected WR improvement: 8.6% → 45%+ based on historical filtering"
+                "**v15 (129-signal audit: system was −0.15R/trade, 36% WR):**\n"
+                "• **Capitulation gate** — no SHORT when Fear&Greed < 20; panic bounces\n"
+                "   stopped shorts out at 29% WR. No LONG when FNG > 80 (euphoria fade)\n"
+                "• **Trend-establishment gate** — SHORT only when price clearly below\n"
+                "   EMA200 (early shorts won 11–26%, established downtrends won 56%)\n"
+                "• Backtested on our own outcomes: flips to +0.27R (≈53% WR), firing\n"
+                "   on the best ~26% of setups — deliberately quality over quantity\n"
+                "• Carries forward v14: TP1 1.1× SL reachable scalp, risk capped at\n"
+                "   PRIME (confidence inverted above 80%), LONG/SHORT gated equally"
             ),
             inline=False,
         )

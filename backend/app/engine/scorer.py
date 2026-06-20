@@ -1,5 +1,5 @@
 """
-Signal Scorer  v10
+Signal Scorer  v14
 Combines the 4 analysis layers into a final confidence score and signal.
 
 Weights:
@@ -7,6 +7,29 @@ Weights:
   Chart patterns        10%  (v9: reduced from 15% — high pattern scores correlated with losses)
   ML model               5%
   Market context         5%
+
+v14 Loss-Recovery Overhaul (Jun 16 2026 — 159-trade audit; v13 collapsed to last-20 = 0W/18L):
+  TP1 was UNREACHABLE: R/R 1.5–2.0 closed 0W/22L while R/R<1.5 won 43%, and every trade
+    that tagged TP1 finished non-loss (21W/22BE). → TP1 = 1.1× SL (was max(atr_1h, 1.8× SL)),
+    TP2 = 2.2× SL runner. Maximise the TP1 tag that flips SL to locked-profit breakeven.
+  Confidence is INVERTED above ~70 (≥90 won 23.5% vs ~44% at 60–80). → stop sizing up:
+    grade capped at PRIME, and the LONG-only +75 confidence floor removed.
+  Short-only bias in an uptrend (145 shorts vs 14 longs, shorts bled out). → LONG and SHORT
+    now gated at the same threshold so the engine can take the winning side of a trend.
+  Surgical fractal SL was the worst stop (structural_15m 28.6% vs atr_1h 43.2%). → only
+    fires when ATR-SL > 4% AND keeps ≥0.70× of the ATR buffer (anti stop-hunt).
+  SHORT entry RSI band 35–45 → 31–41 (drops the 40–45 dead zone, keeps 35–40 sweet spot).
+
+v13 Quality Improvements (Jun 10 2026 — v12 closed 0W/6L; data-backed corrections):
+  RSI SHORT gate: v12's 35→40 was BACKWARDS. Data by entry-RSI: 35-40=50% WR (best),
+    40-45=39%, 45-50=35% (worst), <35=32%. v12 forced every short into the 40-50 dead
+    zone. v13 = band-pass 35-45 (L3 entry + Fast Lane); L2/1H reverted 40→35.
+  Climactic-volume cap added: shorts into >1.8x volume spikes won 37% (vs 50-57% in the
+    0.3-1.5 band) — fade keeps running. (floor 0.15 kept)
+  Breakeven leakage: 43 TP1-tags → 22 (51%) reverted to net-zero. SL on TP1 now locks 30%
+    of the TP1 distance as profit instead of flat breakeven (see outcome_tracker).
+  NOTE: "favor 1h" not actioned — engine is 15m-entry by architecture (score always uses
+    the 4H→1H→15m stack); the 71% "1h" figure is 7 legacy rows. True 1h entry = separate project.
 
 v10 Quality Improvements (Jun 2026 — 3-day audit: 3W/32L → fixed):
   RSI SHORT gate tightened 35 → 40 in L2 (1H MACD), L3 (15m entry trigger), and Fast Lane
@@ -153,11 +176,18 @@ def _position_risk_pct(confidence: float, rr: float, risk_profile: str) -> float
     Tier thresholds: ALPHA ≥ 80%, PRIME ≥ 60%, SETUP < 60%
     Defaults: ALPHA=1.5%, PRIME=1.0%, SETUP=0.5%
     Profile scaling: conservative×0.67, balanced×1.0, aggressive×1.33 (hard cap 5%)
+
+    v14 confidence-inversion guard: the 159-trade audit shows confidence is NOT
+    monotonic with win-rate — the ≥90 bucket won just 23.5% while the 60–80 band won
+    ~44%. The bonus stack (SMC +12, sweep +15, full-hybrid +10, …) inflates score
+    without predictive value, so paying ALPHA-sized risk for ≥80 confidence was
+    systematically over-betting the WORST cohort. Until the score is recalibrated we
+    cap the grade at PRIME: never size up on high confidence.
     """
     from app.core.config_store import get_risk_per_tier
     risk_map = get_risk_per_tier()
 
-    grade = "ALPHA" if confidence >= 80 else "PRIME" if confidence >= 60 else "SETUP"
+    grade = "PRIME" if confidence >= 60 else "SETUP"
     base_risk = risk_map.get(grade, 1.0)
 
     profile_scale = {"conservative": 0.67, "balanced": 1.0, "aggressive": 1.33}
@@ -329,6 +359,14 @@ async def score_symbol(symbol: str, timeframe: str, risk_profile: str = "balance
                 "thin market, entry unreliable (min raised 0.05→0.15)"
             )
             return None
+        # v13: climactic-volume cap. Shorts into >1.8x volume spikes won only 37% of the
+        # time (vs 50-57% in the 0.3-1.5 band) — the spike usually keeps running.
+        if _vol_ratio > 1.8:
+            logger.info(
+                f"Skipping {symbol}/{timeframe}: climactic volume ({_vol_ratio:.2f}x avg) — "
+                "spike likely to continue, fade is high-risk (v13 cap 1.8x)"
+            )
+            return None
 
         funding, fear_greed, news_score, oi_change = await asyncio.gather(
             binance.get_funding_rate(symbol),
@@ -371,8 +409,15 @@ async def score_symbol(symbol: str, timeframe: str, risk_profile: str = "balance
         perf_adj   = confidence_adjustment(symbol, timeframe)
         confidence = max(0.0, min(100.0, confidence + perf_adj))
 
+        # v14: drop the LONG-only +75 floor. The 159-trade audit showed (a) confidence is
+        # inverted above ~70 (≥90 won 23.5% vs ~44% in the 60–80 band), so the 75 gate was
+        # forcing longs into the worst-performing score zone, and (b) it starved longs
+        # entirely — 145 shorts vs 14 longs — while the market trended up and essentially
+        # every short was stopped out (last 20 closed = 0W/18L). Gating both sides at the
+        # same threshold lets the system actually take the winning side of an uptrend.
+        # The LONG 2-bar-MACD-rise requirement in _ctf_confirm still filters dead-cat bounces.
         min_conf = settings.min_confidence(risk_profile)
-        direction_min = max(min_conf, 75) if ta_direction == 1 else min_conf
+        direction_min = min_conf
         perf_str = f"{perf_adj:+.1f}pts" if perf_adj != 0.0 else "no data"
         logger.info(
             f"Score {symbol}/{timeframe}: confidence={confidence:.1f}% "
@@ -383,6 +428,53 @@ async def score_symbol(symbol: str, timeframe: str, risk_profile: str = "balance
             return None
 
         direction = "LONG" if ta_direction == 1 else "SHORT"
+
+        # ── v15 Market-Context Gate (129-signal audit, 2026-06-20) ───────────────
+        # The system's core failure was *fighting* market context. Two gates below,
+        # each validated on our own resolved-signal dataset, flip the system from a
+        # −0.148R/trade loser (36% WR) to +0.27R (≈53% WR) by refusing the cohorts
+        # that historically bled out. We deliberately stop at these two — adding more
+        # filters pushed WR to 60% but on n=5 (overfit, won't generalise).
+        #
+        # Gate 1 — Capitulation/Euphoria: SHORT into Fear&Greed < 20 won just 29%
+        # (panic bounces stop shorts out). This gate alone moved expectancy
+        # −0.148R → +0.221R. Symmetric long-side guard at FNG > 80 (euphoria fades).
+        fng_val = fear_greed["value"]
+        if direction == "SHORT" and fng_val < 20:
+            logger.info(
+                f"Skipping {symbol}/{timeframe} SHORT — capitulation zone "
+                f"(FNG {fng_val} < 20); panic bounces stop shorts out (29% WR in audit)"
+            )
+            return None
+        if direction == "LONG" and fng_val > 80:
+            logger.info(
+                f"Skipping {symbol}/{timeframe} LONG — euphoria zone "
+                f"(FNG {fng_val} > 80); blow-off tops reverse on longs"
+            )
+            return None
+
+        # Gate 2 — Trend establishment: SHORT within 1.5% of EMA200 won 11–26%
+        # (entering before the downtrend is real); SHORT already >2% below EMA200 won
+        # 56%. Require the entry to sit on the established-trend side of EMA200 by a
+        # clear margin. Symmetric for LONG (price must be clearly above EMA200).
+        try:
+            _ema200 = float(_ta.trend.EMAIndicator(df["close"], 200).ema_indicator().iloc[-1])
+            ema200_gap = (price - _ema200) / (_ema200 + 1e-10) * 100
+        except Exception:
+            ema200_gap = None
+        if ema200_gap is not None:
+            if direction == "SHORT" and ema200_gap > -1.5:
+                logger.info(
+                    f"Skipping {symbol}/{timeframe} SHORT — downtrend not established "
+                    f"(ema200_gap {ema200_gap:+.2f}% > -1.5%); early shorts won 11–26% in audit"
+                )
+                return None
+            if direction == "LONG" and ema200_gap < 1.5:
+                logger.info(
+                    f"Skipping {symbol}/{timeframe} LONG — uptrend not established "
+                    f"(ema200_gap {ema200_gap:+.2f}% < +1.5%)"
+                )
+                return None
 
         # ── v7 Liquidity Tier ────────────────────────────────────────────────
         _FEE_RT      = 0.0008
@@ -406,18 +498,24 @@ async def score_symbol(symbol: str, timeframe: str, risk_profile: str = "balance
         sl_method     = "atr_1h"
         sl_price_dist = atr_sl_dist          # final SL distance in price units
 
-        if atr_sl_pct > 0.025:
+        # v14: the surgical fractal stop was our WORST performer — structural_15m closed
+        # 28.6% WR vs 43.2% for the plain atr_1h stop (159-trade audit). It fires on
+        # high-ATR coins and tightens the stop, which then gets wicked out (stop-hunt).
+        # Two guards: (a) only consider it when the ATR stop is genuinely huge (>4%, was
+        # 2.5%), and (b) never adopt a swing that is more than ~30% tighter than the ATR
+        # stop — keep most of the volatility buffer that protects the trade.
+        if atr_sl_pct > 0.040:
             _df_sl = df_entry
             if _df_sl is not None and len(_df_sl) >= 10:
                 swing_price = _surgical_swing_sl(_df_sl, direction)
                 swing_dist  = abs(price - swing_price)
                 swing_pct   = swing_dist / price
-                if 0 < swing_pct < atr_sl_pct:
+                if atr_sl_pct * 0.70 <= swing_pct < atr_sl_pct:
                     sl_price_dist = swing_dist
                     sl_method     = "structural_15m"
                     logger.info(
-                        f"{symbol}: ATR-SL {atr_sl_pct*100:.2f}% > 2.5% → "
-                        f"15m fractal SL {swing_pct*100:.2f}%"
+                        f"{symbol}: ATR-SL {atr_sl_pct*100:.2f}% > 4.0% → "
+                        f"15m fractal SL {swing_pct*100:.2f}% (≥0.70× ATR buffer kept)"
                     )
 
         # ── v8 Volatility Noise Floor ─────────────────────────────────────────
@@ -452,13 +550,18 @@ async def score_symbol(symbol: str, timeframe: str, risk_profile: str = "balance
             )
             return None
 
-        # ── v10 ATR Scalp Targets ────────────────────────────────────────────
-        # TP1 guaranteed ≥ 1.8× SL distance. After the 0.08% round-trip fee drag this
-        # yields net R/R ≈ 1.6–1.76, which clears the 1.5 runner floor (the old 1.5×
-        # multiplier capped net R/R at 1.46 and would reject every signal).
-        # TP2 extends exactly one ATR beyond TP1 (runner target).
-        tp1_dist = max(atr_1h, sl_price_dist * 1.8)
-        tp2_dist = tp1_dist + atr_1h
+        # ── v14 Reachable Scalp Targets ──────────────────────────────────────
+        # DATA (159 closed): R/R 1.5–2.0 went 0W/22L — TP1 was simply too far to reach.
+        # The whole v10/v13 "max(atr_1h, 1.8× SL)" target inflated TP1 onto coins where
+        # price reverted long before the fill. Meanwhile the R/R<1.5 bucket won 43%, and
+        # every trade that DID tag TP1 (tp1_hit=1) finished non-loss (21W/22BE, 0 losses)
+        # because SL then moved to locked-profit breakeven.
+        # v14 therefore puts TP1 close (1.1× SL) to maximise the TP1-tag rate — that tag
+        # is what protects the trade — and lets TP2 (2.2× SL) be the runner/profit leg.
+        # `atr_1h` is no longer a floor: a full 1H ATR is a huge hop for a 15m scalp and
+        # was the main cause of the unreachable targets.
+        tp1_dist = sl_price_dist * 1.1
+        tp2_dist = sl_price_dist * 2.2
 
         tp1_pct  = tp1_dist / price
         net_gain = tp1_pct  - _FEE_RT
